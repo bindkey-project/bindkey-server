@@ -1,3 +1,3 @@
-# bindkey-esp
-BindKey - Master Project - ESP32 Code Repository
+# bindkey-server
+BindKey - Master Project - Server Code Repository
 
