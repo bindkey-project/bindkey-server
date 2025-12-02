@@ -1,20 +1,25 @@
 use axum::{
+    extract::State,
     routing::get,
     Router,
 };
 
-/// Crée et retourne le routeur principal de l’API BindKey.
+use crate::db::AppState; // ⬅️ on importe le type AppState
+
+/// Crée le router principal de l'API BindKey.
 ///
-/// Pour l’instant, il ne contient qu’une seule route :
-///   - GET /health  → renvoie "OK"
-pub fn create_app() -> Router {
+/// On lui passe un `AppState` qui contient la connexion DB.
+/// Axum va cloner ce state pour chaque handler.
+pub fn create_app(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health_check))
+        .with_state(state) // ⬅️ on associe le state à toutes les routes
 }
 
-/// Handler pour la route GET /health.
-/// Cette fonction est appelée quand un client fait une requête HTTP GET
-/// sur /health.
-async fn health_check() -> &'static str {
+/// Handler pour GET /health.
+/// Ici on montre comment récupérer le state, même si on ne l'utilise pas encore.
+async fn health_check(
+    State(_state): State<AppState>, // ⬅️ `_state` = on dit à Rust "je sais qu'il existe"
+) -> &'static str {
     "OK"
 }
