@@ -2,6 +2,9 @@ use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
+use dotenvy::dotenv;
+use std::env;
+
 use axum::Router;
 
 mod api;
@@ -12,6 +15,9 @@ use db::AppState; // ⬅️ on importe AppState depuis db.rs
 
 #[tokio::main]
 async fn main() {
+
+    dotenv().ok();
+
     // 1) Logs
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
