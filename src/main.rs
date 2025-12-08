@@ -13,6 +13,7 @@ use db::AppState; // ⬅️ on importe AppState depuis db.rs
 #[tokio::main]
 async fn main() {
     // 1) Logs
+    dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .init();
