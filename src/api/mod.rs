@@ -1,25 +1,18 @@
-use axum::{
-    extract::State,
-    routing::get,
-    Router,
-};
+use axum::{Router, routing::get, extract::State};
+use crate::db::AppState;
+use crate::api::routes::user_routes;
 
-use crate::db::AppState; // ⬅️ on importe le type AppState
-
-/// Crée le router principal de l'API BindKey.
-///
-/// On lui passe un `AppState` qui contient la connexion DB.
-/// Axum va cloner ce state pour chaque handler.
+// Construit le routeur principal de l'API (BindKey)
 pub fn create_app(state: AppState) -> Router {
     Router::new()
-        .route("/health", get(health_check))
-        .with_state(state) // ⬅️ on associe le state à toutes les routes
+        .merge(user_routes())            // Ajoute les routes /users
+        .route("/health", get(health_check)) // Endpoint simple pour vérifier l'état du serveur
+        .with_state(state)               // Partage AppState (connexion DB) avec tous les handlers
 }
 
-/// Handler pour GET /health.
-/// Ici on montre comment récupérer le state, même si on ne l'utilise pas encore.
+// Route GET /health → indique que l'API fonctionne
 async fn health_check(
-    State(_state): State<AppState>, // ⬅️ `_state` = on dit à Rust "je sais qu'il existe"
+    State(_state): State<AppState>,      // Le state est reçu mais non utilisé ici
 ) -> &'static str {
     "OK"
 }

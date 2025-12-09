@@ -1,7 +1,7 @@
 use std::env;
 
  
-// ↑ On importe le module standard "env" de Rust.
+//   On importe le module standard "env" de Rust.
 //   Il permet de lire les variables d’environnement (ENV VARS) :
 //   - depuis le système (ex: export BINDKEY_PORT=8080)
 //   - depuis le fichier .env (grâce à dotenvy)

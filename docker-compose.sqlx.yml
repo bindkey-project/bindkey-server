@@ -1,36 +1,55 @@
-version: "3.9"
+version: "3.9"  # Version du format Docker Compose
 
 services:
+  # -----------------------------------------------------
+  # SERVICE 1 : Base de données PostgreSQL
+  # -----------------------------------------------------
   bindkey-db:
-    image: postgres:16
-    container_name: bindkey-db
-    restart: always
-    environment:
-      POSTGRES_USER: bindkey
-      POSTGRES_PASSWORD: bindkey
-      POSTGRES_DB: bindkey
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
+    image: postgres:16              # Utilise l'image PostgreSQL version 16
+    container_name: bindkey-db      # Nom du conteneur 
+    restart: always                 # Redémarre automatiquement en cas de crash
 
-  sqlx:
-    image: rust:latest
-    container_name: sqlx-runner
-    working_dir: /app
+    environment:                    # Variables d'environnement pour configurer PostgreSQL
+      POSTGRES_USER: bindkey        # Nom d'utilisateur pour la BD
+      POSTGRES_PASSWORD: bindkey    # Mot de passe de la BD
+      POSTGRES_DB: bindkey          # Nom de la base de données créée automatiquement
+
+    ports:
+      - "5432:5432"                 # Rend PostgreSQL accessible depuis la machine (localhost:5432)
+
     volumes:
-      - ./src:/app
+      - pgdata:/var/lib/postgresql/data   # Volume persistant pour sauvegarder les données de la BD
+
+
+  # -----------------------------------------------------
+  # SERVICE 2 : SQLX Runner (exécute automatiquement les migrations)
+  # -----------------------------------------------------
+  sqlx:
+    image: rust:latest              # Image Rust (nécessaire car SQLX est un outil Rust)
+    container_name: sqlx-runner     # Nom du conteneur SQLX
+    working_dir: /app               # Dossier de travail dans le conteneur
+
+    volumes:
+      - ./src:/app                  # Monte le dossier src/ dans le conteneur (pour accéder aux migrations)
+
     environment:
+      # URL de connexion vers PostgreSQL
+      #"bindkey-db" = nom du conteneur PostgreSQL (Docker crée le réseau automatiquement)
       DATABASE_URL: postgres://bindkey:bindkey@bindkey-db:5432/bindkey
+
     depends_on:
-      - bindkey-db
+      - bindkey-db                 # Assure que PostgreSQL démarre AVANT SQLX
+
+    # Commandes exécutées AUTOMATIQUEMENT au démarrage
     command: >
       bash -c "
-        rustup toolchain install stable &&
-        cargo install sqlx-cli --no-default-features --features postgres &&
-        sqlx migrate run
+        rustup toolchain install stable &&                           # Installe Rust stable (sécurité)
+        cargo install sqlx-cli --no-default-features --features postgres &&  # Installe l’outil CLI SQLX
+        sqlx migrate run                                             # Exécute toutes les migrations SQL
       "
 
+# -----------------------------------------------------
+# Déclaration du volume persistant pour PostgreSQL
+# -----------------------------------------------------
 volumes:
-  pgdata:
-
+  pgdata:     # Ce volume stocke définitivement les données BD (ne sont pas supprimées même si le conteneur l’est)
