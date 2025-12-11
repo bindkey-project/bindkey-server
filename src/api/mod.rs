@@ -1,3 +1,8 @@
+// Déclaration des sous-modules de `api`
+pub mod models;
+pub mod handlers;
+pub mod routes;
+
 use axum::{Router, routing::get, extract::State};
 use crate::db::AppState;
 use crate::api::routes::user_routes;
@@ -16,3 +21,4 @@ async fn health_check(
 ) -> &'static str {
     "OK"
 }
+

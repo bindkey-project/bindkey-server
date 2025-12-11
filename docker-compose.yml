@@ -1,35 +1,34 @@
-# Version du format Docker Compose utilisée
 version: "3.9"
 
-# Déclaration des services (conteneurs) à lancer
 services:
-
-  # Nom du service représentant la base PostgreSQL
-  db:
-  
-    # Image Docker utilisée : PostgreSQL version 16
+  bindkey-db:
     image: postgres:16
-    
-    # Nom du conteneur pour pouvoir l'identifier facilement
     container_name: bindkey-db
-    
-    # Redémarre automatiquement si le conteneur s'arrête ou si Docker redémarre
     restart: always
-
-    # Variables d'environnement utilisées par PostgreSQL pour l'initialisation
     environment:
-      POSTGRES_USER: bindkey      # Nom de l'utilisateur PostgreSQL créé automatiquement
-      POSTGRES_PASSWORD: bindkey  # Mot de passe associé
-      POSTGRES_DB: bindkey        # Nom de la base de données créée au démarrage
-
-    # Exposition du port PostgreSQL (interne -> externe)
+      POSTGRES_USER: bindkey
+      POSTGRES_PASSWORD: bindkey
+      POSTGRES_DB: bindkey
     ports:
-      - "5432:5432"               # Permet de se connecter via localhost:5432
-
-    # Stockage persistant des données
+      - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data  # Le dossier interne où PostgreSQL stocke ses données
+      - pgdata:/var/lib/postgresql/data
 
-# Déclaration du volume persistant utilisé par PostgreSQL
+  sqlx:
+    image: rust:latest
+    container_name: sqlx-runner
+    working_dir: /app
+    volumes:
+      - ./:/app
+    environment:
+      DATABASE_URL: postgres://bindkey:bindkey@bindkey-db:5432/bindkey
+    depends_on:
+      - bindkey-db
+    command: >
+      bash -c "
+        cargo install sqlx-cli --no-default-features --features postgres &&
+        sqlx migrate run
+      "
+
 volumes:
-  pgdata:                           # Nom du volume (géré par Docker)
+  pgdata:
