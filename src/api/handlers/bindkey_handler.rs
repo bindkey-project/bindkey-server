@@ -1,39 +1,60 @@
+// Axum : framework web Rust
+// Json      → gérer les bodies JSON
+// State     → accéder à l’état global (DB, config)
+// Path      → récupérer les paramètres dans l’URL
+// StatusCode→ renvoyer des codes HTTP propres
 use axum::{
     Json,
     extract::{State, Path},
     http::StatusCode,
 };
 
+// UUID : identifiants uniques (users, bindkeys, etc.)
 use uuid::Uuid;
 
+// AppState : contient le pool de connexion PostgreSQL
 use crate::db::AppState;
+
+// Modèle Bindkey + enum de statut
 use crate::api::models::bindkey::{Bindkey, BindkeyStatus};
 
-// -------------------------------
-// 1) ENROLL: POST /bindkeys/enroll
-// -------------------------------
+//
+// ─────────────────────────────────────────────────────────────
+// 1) ENROLL — POST /bindkeys/enroll
+// ─────────────────────────────────────────────────────────────
+//
+// Objectif :
+// Associer une BindKey biométrique à un utilisateur
+// → opération faite UNE SEULE FOIS lors de l’enrôlement
+//
 
+/// Données reçues depuis le client lors de l’enrôlement
 #[derive(serde::Deserialize)]
 pub struct EnrollBindkeyRequest {
-    pub user_id: Uuid,
-    pub bindkey_uid: String,
-    pub public_key: String,
-    pub fingerprint_template: String,
+    pub user_id: Uuid,              // Utilisateur propriétaire de la BindKey
+    pub bindkey_uid: String,        // Identifiant matériel unique
+    pub public_key: String,         // Clé publique (crypto)
+    pub fingerprint_template: String, // Empreinte biométrique (hashée)
 }
 
+/// Réponse envoyée après enrôlement réussi
 #[derive(serde::Serialize)]
 pub struct EnrollBindkeyResponse {
-    pub bindkey_id: Uuid,
+    pub bindkey_id: Uuid,           // ID généré côté serveur
     pub message: String,
 }
 
+/// Handler POST /bindkeys/enroll
 pub async fn enroll_bindkey(
-    State(state): State<AppState>,
-    Json(payload): Json<EnrollBindkeyRequest>,
+    State(state): State<AppState>,          // Accès DB
+    Json(payload): Json<EnrollBindkeyRequest>, // Body JSON
 ) -> Result<Json<EnrollBindkeyResponse>, (StatusCode, String)> {
 
+    // Génération d’un UUID pour la nouvelle BindKey
     let bindkey_id = Uuid::new_v4();
 
+    // Requête SQL d’insertion
+    // → statut initial forcé à ACTIVE
     let query = r#"
         INSERT INTO bindkeys (
             id,
@@ -46,6 +67,7 @@ pub async fn enroll_bindkey(
         VALUES ($1, $2, $3, $4, $5, 'ACTIVE')
     "#;
 
+    // Exécution SQL avec binding sécurisé
     sqlx::query(query)
         .bind(bindkey_id)
         .bind(payload.user_id)
@@ -59,19 +81,25 @@ pub async fn enroll_bindkey(
             format!("Enroll BindKey failed: {}", e)
         ))?;
 
+    // Réponse OK
     Ok(Json(EnrollBindkeyResponse {
         bindkey_id,
         message: "BindKey enrolled successfully".into(),
     }))
 }
 
-// -------------------------------
-// 2) GET: GET /bindkeys/:id
-// -------------------------------
+//
+// ─────────────────────────────────────────────────────────────
+// 2) GET — GET /bindkeys/:id
+// ─────────────────────────────────────────────────────────────
+//
+// Objectif :
+// Récupérer une BindKey précise par son UUID
+//
 
 pub async fn get_bindkey(
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<Uuid>,           // UUID depuis l’URL
 ) -> Result<Json<Bindkey>, (StatusCode, String)> {
 
     let bindkey = sqlx::query_as::<_, Bindkey>(
@@ -88,9 +116,14 @@ pub async fn get_bindkey(
     Ok(Json(bindkey))
 }
 
-// -------------------------------
-// 3) GET: GET /users/:id/bindkeys
-// -------------------------------
+//
+// ─────────────────────────────────────────────────────────────
+// 3) GET — GET /users/:id/bindkeys
+// ─────────────────────────────────────────────────────────────
+//
+// Objectif :
+// Lister toutes les BindKeys associées à un utilisateur
+//
 
 pub async fn get_user_bindkeys(
     State(state): State<AppState>,
@@ -111,10 +144,17 @@ pub async fn get_user_bindkeys(
     Ok(Json(bindkeys))
 }
 
-// -------------------------------
-// 4) PATCH: PATCH /bindkeys/:id/status
-// -------------------------------
+//
+// ─────────────────────────────────────────────────────────────
+// 4) PATCH — PATCH /bindkeys/:id/status
+// ─────────────────────────────────────────────────────────────
+//
+// Objectif :
+// Changer le statut d’une BindKey
+// (ACTIVE / LOST / BROKEN / RESET)
+//
 
+/// Body JSON attendu
 #[derive(serde::Deserialize)]
 pub struct UpdateBindkeyStatusRequest {
     pub status: BindkeyStatus,
@@ -138,6 +178,7 @@ pub async fn update_bindkey_status(
         format!("Failed to update status: {}", e)
     ))?;
 
+    // Si aucune ligne modifiée → BindKey inexistante
     if res.rows_affected() == 0 {
         return Err((StatusCode::NOT_FOUND, "BindKey not found".into()));
     }
@@ -145,14 +186,19 @@ pub async fn update_bindkey_status(
     Ok(StatusCode::NO_CONTENT)
 }
 
-// -------------------------------
-// 5) RESET: POST /bindkeys/:id/reset
-// -------------------------------
+//
+// ─────────────────────────────────────────────────────────────
+// 5) RESET — POST /bindkeys/:id/reset
+// ─────────────────────────────────────────────────────────────
+//
+// Objectif :
+// Tracer une réinitialisation de BindKey (audit & sécurité)
+//
 
 #[derive(serde::Deserialize)]
 pub struct ResetBindkeyRequest {
-    pub reset_type: String,
-    pub performed_by: Uuid,
+    pub reset_type: String, // perte, corruption, effacement…
+    pub performed_by: Uuid, // admin / utilisateur
 }
 
 pub async fn reset_bindkey(

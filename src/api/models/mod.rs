@@ -25,3 +25,5 @@ pub mod session;
 // Modèle pour la table `audit_log` (journalisation sécurisée)
 pub mod audit_log;
 
+pub mod mounted_volume;
+
