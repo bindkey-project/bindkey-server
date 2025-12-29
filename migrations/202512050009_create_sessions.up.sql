@@ -22,8 +22,6 @@ CREATE TABLE sessions (
     expires_at TIMESTAMPTZ NOT NULL,                           
     -- Date d’expiration de la session (obligatoire pour la sécurité).
 
-    device_id UUID,
-
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()             
     -- Date de création de la session.
 );
