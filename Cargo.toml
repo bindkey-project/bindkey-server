@@ -1,13 +1,47 @@
+# ─────────────────────────────────────────────
+# Informations générales du projet Rust
+# ─────────────────────────────────────────────
 [package]
-name = "bindkey-server"
-version = "0.1.0"
-edition = "2024"
+name = "bindkey-server"       # Nom du binaire généré (bindkey-server)
+version = "0.1.0"             # Version de ton application
+edition = "2024"              # Version du langage Rust utilisée (la plus récente)
 
+
+# ─────────────────────────────────────────────
+# Dépendances Rust utilisées par le projet
+# ─────────────────────────────────────────────
 [dependencies]
+
+# Framework web utilisé pour créer l'API HTTP (routes, JSON, extracteurs...)
 axum = "0.7"
-tokio = { version = "1", features = ["full"] }
+
+# Runtime asynchrone indispensable pour Axum + SQLx
+tokio = { version = "1", features = ["full", "macros", "rt-multi-thread"] }
+
+# Système de logs moderne
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 
+# Lecture automatique des variables dans le fichier .env
 dotenvy = "0.15"
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres"] }
+
+# ORM async pour PostgreSQL + support UUID/chrono + macros + migrations
+sqlx = { version = "0.7", features = [
+    "postgres",
+    "uuid",
+    "chrono",
+    "runtime-tokio-native-tls",
+    "macros",
+    "migrate"
+] }
+
+# Sérialisation/désérialisation JSON (Serialize / Deserialize)
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+
+# Gestion des UUID (id des users, devices, etc.)
+uuid = { version = "1.19.0", features = ["v4", "serde"] }
+
+# Gestion des dates/timestamps PostgreSQL (TIMESTAMPTZ)
+chrono = { version = "0.4.42", features = ["serde"] }
+

@@ -2,16 +2,22 @@ use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
+use dotenvy::dotenv;
+use std::env;
+
 use axum::Router;
 
 mod api;
 mod config;
 mod db;
 
-use db::AppState; // ⬅️ on importe AppState depuis db.rs
+use db::AppState; // on importe AppState depuis db.rs
 
 #[tokio::main]
 async fn main() {
+
+    dotenv().ok();
+
     // 1) Logs
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
@@ -24,12 +30,12 @@ async fn main() {
     // 3) Connexion BDD
     let pool = db::create_pool(&cfg.database_url)
         .await
-        .expect("❌ Failed to connect to PostgreSQL");
-    tracing::info!("✅ Successfully connected to PostgreSQL");
+        .expect("Failed to connect to PostgreSQL");
+    tracing::info!("Successfully connected to PostgreSQL");
 
-    tracing::info!("📦 Running database migrations...");
-    sqlx::migrate!().run(&pool).await.expect("❌ Migration failed");
-    tracing::info!("✅ Migrations applied");
+    tracing::info!("Running database migrations...");
+    sqlx::migrate!().run(&pool).await.expect("Migration failed");
+    tracing::info!("Migrations applied");
 
     // 4) Création du state global
     let state = AppState { db: pool };

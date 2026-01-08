@@ -1,0 +1,4 @@
+CREATE TYPE user_role AS ENUM ('USER', 'ENROLLER', 'ADMIN');
+CREATE TYPE user_status AS ENUM ('ACTIVE', 'DISABLED');
+CREATE TYPE bindkey_status AS ENUM ('ACTIVE', 'RESET', 'LOST', 'BROKEN');
+CREATE TYPE permission_level AS ENUM ('READ', 'READ_WRITE');
