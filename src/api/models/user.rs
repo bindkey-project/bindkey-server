@@ -57,17 +57,7 @@ pub struct User {
     pub updated_at: DateTime<Utc>,
 }
 
-
-/// ─────────────────────────────────────────────────────────────
-/// ENUM UserRole : représentation Rust de l’ENUM SQL user_role
-/// ─────────────────────────────────────────────────────────────
-//
-// #[sqlx::Type] indique que ce type correspond à un type SQL ENUM.
-// type_name = "user_role" → correspond EXACTEMENT au nom PostgreSQL.
-// rename_all = "UPPERCASE" → convertit automatiquement USER → "USER".
-//
-
-#[derive(Debug, Serialize, Deserialize, sqlx::Type)]
+#[derive(sqlx::Type, serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[sqlx(type_name = "user_role", rename_all = "UPPERCASE")]
 pub enum UserRole {
     USER,
@@ -75,17 +65,10 @@ pub enum UserRole {
     ADMIN,
 }
 
-
-/// ─────────────────────────────────────────────────────────────
-/// ENUM UserStatus : correspond à l’ENUM SQL user_status
-/// ─────────────────────────────────────────────────────────────
-//
-// Même logique que UserRole.
-//
-
-#[derive(Debug, Serialize, Deserialize, sqlx::Type)]
+#[derive(sqlx::Type, serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[sqlx(type_name = "user_status", rename_all = "UPPERCASE")]
 pub enum UserStatus {
     ACTIVE,
     DISABLED,
 }
+

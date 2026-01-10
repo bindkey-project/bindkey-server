@@ -3,10 +3,12 @@
 // - State : accès à l’état global (DB)
 // - Path : lecture des paramètres dans l’URL
 // - StatusCode : codes HTTP clairs
+// - Extension : récupérer AuthUser injecté par le middleware (RBAC)
 use axum::{
     Json,
     extract::{State, Path},
-    http::StatusCode
+    http::StatusCode,
+    Extension,
 };
 
 // UUID pour identifier permissions, users, volumes
@@ -16,10 +18,11 @@ use uuid::Uuid;
 use crate::db::AppState;
 
 // Modèle VolumePermission + enum PermissionLevel (READ / READ_WRITE)
-use crate::api::models::volume_permission::{
-    VolumePermission,
-    PermissionLevel
-};
+use crate::api::models::volume_permission::{VolumePermission, PermissionLevel};
+
+// Auth (RBAC)
+use crate::api::auth::{AuthUser, require_role};
+use crate::api::models::user::UserRole;
 
 //
 // ─────────────────────────────────────────────────────────────
@@ -30,18 +33,16 @@ use crate::api::models::volume_permission::{
 // Données reçues lors du partage d’un volume
 #[derive(serde::Deserialize)]
 pub struct ShareVolumeRequest {
-    pub grantee_id: Uuid,                 // Utilisateur qui reçoit l’accès
-    pub permission: PermissionLevel,      // Niveau d’accès (READ / READ_WRITE)
-    pub expires_at: Option<chrono::DateTime<chrono::Utc>>, 
-    // Date d’expiration optionnelle du droit
-    pub created_by: Uuid,                 
-    // Utilisateur qui partage (en attendant l’auth, transmis dans le body)
+    pub grantee_id: Uuid,            // Utilisateur qui reçoit l’accès
+    pub permission: PermissionLevel, // Niveau d’accès (READ / READ_WRITE)
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>, // Expiration optionnelle
+    // created_by supprimé : on le déduit du token (auth.user_id)
 }
 
 // Réponse envoyée après un partage réussi
 #[derive(serde::Serialize)]
 pub struct ShareVolumeResponse {
-    pub permission_id: Uuid,               // ID de la permission créée
+    pub permission_id: Uuid, // ID de la permission créée
     pub message: String,
 }
 
@@ -49,19 +50,20 @@ pub struct ShareVolumeResponse {
 // ─────────────────────────────────────────────────────────────
 // POST /volumes/:id/share
 // Objectif : partager un volume à un autre utilisateur
-// ⚠️ RÈGLE DE SÉCURITÉ CRITIQUE (Risque #9)
+// RÈGLE DE SÉCURITÉ CRITIQUE (Risque #9)
 // Seul le propriétaire du volume peut le partager
+// (+ ADMIN override possible)
 // ─────────────────────────────────────────────────────────────
 //
 
 pub async fn share_volume(
-    State(state): State<AppState>,          // Accès DB
-    Path(volume_id): Path<Uuid>,            // ID du volume à partager
-    Json(payload): Json<ShareVolumeRequest> // Données de partage
+    Extension(auth): Extension<AuthUser>,    // Utilisateur authentifié
+    State(state): State<AppState>,           // Accès DB
+    Path(volume_id): Path<Uuid>,             // ID du volume à partager
+    Json(payload): Json<ShareVolumeRequest>, // Données de partage
 ) -> Result<Json<ShareVolumeResponse>, (StatusCode, String)> {
 
-    // 1️⃣ Vérification du propriétaire du volume
-    // On récupère l’owner_id depuis la table volumes
+    // 1️ Vérification du propriétaire du volume
     let owner_id: Uuid = sqlx::query_scalar(
         "SELECT owner_id FROM volumes WHERE id = $1"
     )
@@ -73,15 +75,18 @@ pub async fn share_volume(
         "Volume not found".into()
     ))?;
 
-    // Si l’utilisateur qui tente de partager n’est pas le propriétaire → refus
-    if owner_id != payload.created_by {
+    // owner check + admin override
+    let is_owner = owner_id == auth.user_id;
+    let is_admin = require_role(&auth.role, &UserRole::ADMIN);
+
+    if !is_owner && !is_admin {
         return Err((
             StatusCode::FORBIDDEN,
-            "Only owner can share this volume".into()
+            "Only owner (or ADMIN) can share this volume".into()
         ));
     }
 
-    // 2️⃣ Création de la permission
+    // 2️Création de la permission
     let perm_id = Uuid::new_v4();
 
     sqlx::query(
@@ -102,7 +107,7 @@ pub async fn share_volume(
     .bind(payload.grantee_id)
     .bind(payload.permission)
     .bind(payload.expires_at)
-    .bind(payload.created_by)
+    .bind(auth.user_id) // created_by réel depuis le token
     .execute(&state.db)
     .await
     .map_err(|e| (
@@ -110,7 +115,6 @@ pub async fn share_volume(
         format!("SQL error: {e}")
     ))?;
 
-    // Réponse de succès
     Ok(Json(ShareVolumeResponse {
         permission_id: perm_id,
         message: "Volume shared".into(),
@@ -125,11 +129,10 @@ pub async fn share_volume(
 //
 
 pub async fn list_volume_permissions(
-    State(state): State<AppState>,     // Accès DB
-    Path(volume_id): Path<Uuid>,       // Volume concerné
+    State(state): State<AppState>,
+    Path(volume_id): Path<Uuid>,
 ) -> Result<Json<Vec<VolumePermission>>, (StatusCode, String)> {
 
-    // Récupération de toutes les permissions associées au volume
     let list = sqlx::query_as::<_, VolumePermission>(
         "SELECT * FROM volume_permissions
          WHERE volume_id = $1
@@ -154,8 +157,8 @@ pub async fn list_volume_permissions(
 //
 
 pub async fn revoke_permission(
-    State(state): State<AppState>,    // Accès DB
-    Path(permission_id): Path<Uuid>,  // ID de la permission à supprimer
+    State(state): State<AppState>,
+    Path(permission_id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
 
     let res = sqlx::query(
@@ -169,7 +172,6 @@ pub async fn revoke_permission(
         format!("SQL error: {e}")
     ))?;
 
-    // Si aucune ligne supprimée → permission inexistante
     if res.rows_affected() == 0 {
         return Err((
             StatusCode::NOT_FOUND,
@@ -177,6 +179,5 @@ pub async fn revoke_permission(
         ));
     }
 
-    // Succès sans contenu
     Ok(StatusCode::NO_CONTENT)
 }

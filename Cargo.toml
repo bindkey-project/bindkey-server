@@ -45,3 +45,16 @@ uuid = { version = "1.19.0", features = ["v4", "serde"] }
 # Gestion des dates/timestamps PostgreSQL (TIMESTAMPTZ)
 chrono = { version = "0.4.42", features = ["serde"] }
 
+# Hash sécurisé des secrets (recovery code, mots de passe, etc.)
+# → recommandé pour la sécurité (résistant aux attaques par brute-force)
+argon2 = "0.5"
+
+# Génération de valeurs aléatoires sécurisées
+# → utilisé pour créer des codes uniques (recovery code, tokens, etc.)
+rand = "0.8"
+
+# Gestion du temps (durées, timestamps, expiration)
+# → utile pour tokens, sessions, expiration des accès
+time = "0.3"
+
+hex = "0.4"
