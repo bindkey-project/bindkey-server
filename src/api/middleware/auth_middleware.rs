@@ -19,6 +19,7 @@ pub async fn auth_middleware(
     mut req: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, String)> {
+    
     // 1) Lire le header Authorization
     let auth_header = req
         .headers()

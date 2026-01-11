@@ -51,9 +51,7 @@ pub fn create_app(state: AppState) -> Router {
     // Routes publiques (pas d’auth requise)
     // ─────────────────────────────────────────
     let public = Router::new()
-        // Routes liées aux utilisateurs
-        // (/users, /users/:id, etc.)
-        .merge(user_routes())
+        
 
         // Routes de gestion des sessions
         // (login, refresh, logout)
@@ -82,6 +80,10 @@ pub fn create_app(state: AppState) -> Router {
         // Montage / démontage des volumes
         .merge(mount_routes())
 
+        // Routes liées aux utilisateurs
+        // (/users, /users/:id, etc.)
+        .merge(user_routes())
+        
         // Middleware global d’authentification
         // → valide le Bearer token avant d’atteindre les handlers
         .layer(from_fn_with_state(state.clone(), auth_middleware));

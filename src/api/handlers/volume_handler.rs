@@ -1,17 +1,18 @@
 // Axum :
-// - Json : gestion des corps JSON
-// - State : accès à l’état global (pool DB)
+// - Json : payload JSON
+// - State : accès à l’état global (DB)
 // - Path : paramètres d’URL (/volumes/:id)
-// - StatusCode : codes HTTP explicites
+// - StatusCode : réponses HTTP claires
+// - Extension : récupérer AuthUser injecté par le middleware
 use axum::{Json, extract::{State, Path}, http::StatusCode, Extension};
 
-// UUID pour identifier volumes, users, disques
+// UUID
 use uuid::Uuid;
 
-// Accès à la base de données
+// DB
 use crate::db::AppState;
 
-// Modèle Volume (correspond à la table PostgreSQL volumes)
+// Modèle Volume
 use crate::api::models::volume::Volume;
 
 // Auth (RBAC)
@@ -21,13 +22,13 @@ use crate::api::models::user::UserRole;
 //
 // ─────────────────────────────────────────────────────────────
 // POST /volumes
-// Objectif : créer un volume chiffré BindKey
+// Objectif : créer un volume chiffré
+// Sécurité : owner_id vient DU TOKEN (pas du body)
 // ─────────────────────────────────────────────────────────────
 //
 
 #[derive(serde::Deserialize)]
 pub struct CreateVolumeRequest {
-    pub owner_id: Uuid,        // ⚠️ ignoré (owner = auth.user_id)
     pub disk_id: Uuid,
     pub name: String,
     pub size_bytes: i64,
@@ -41,26 +42,21 @@ pub struct CreateVolumeResponse {
 }
 
 pub async fn create_volume(
-    Extension(auth): Extension<AuthUser>,     // ✅ utilisateur authentifié
+    Extension(auth): Extension<AuthUser>,   // user authentifié
     State(state): State<AppState>,
     Json(payload): Json<CreateVolumeRequest>,
 ) -> Result<Json<CreateVolumeResponse>, (StatusCode, String)> {
-
-    // ✅ Owner réel = user connecté (anti-spoof)
-    let owner_id = auth.user_id;
-
     let volume_id = Uuid::new_v4();
 
+    // owner = auth.user_id (anti-spoof)
     sqlx::query(
         r#"
-        INSERT INTO volumes (
-            id, owner_id, disk_id, name, size_bytes, encrypted_key
-        )
+        INSERT INTO volumes (id, owner_id, disk_id, name, size_bytes, encrypted_key)
         VALUES ($1, $2, $3, $4, $5, $6)
         "#
     )
     .bind(volume_id)
-    .bind(owner_id)
+    .bind(auth.user_id)
     .bind(payload.disk_id)
     .bind(&payload.name)
     .bind(payload.size_bytes)
@@ -78,21 +74,29 @@ pub async fn create_volume(
 //
 // ─────────────────────────────────────────────────────────────
 // GET /volumes/:id
+// Objectif : récupérer un volume
+// Sécurité : owner OU ADMIN
 // ─────────────────────────────────────────────────────────────
 //
 
 pub async fn get_volume(
+    Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Volume>, (StatusCode, String)> {
+    let v = sqlx::query_as::<_, Volume>("SELECT * FROM volumes WHERE id = $1")
+        .bind(id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|_| (StatusCode::NOT_FOUND, "Volume not found".into()))?;
 
-    let v = sqlx::query_as::<_, Volume>(
-        "SELECT * FROM volumes WHERE id = $1"
-    )
-    .bind(id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|_| (StatusCode::NOT_FOUND, "Volume not found".into()))?;
+    //  Vérif owner/admin
+    let is_owner = v.owner_id == auth.user_id;
+    let is_admin = require_role(&auth.role, &UserRole::ADMIN);
+
+    if !is_owner && !is_admin {
+        return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
+    }
 
     Ok(Json(v))
 }
@@ -100,30 +104,27 @@ pub async fn get_volume(
 //
 // ─────────────────────────────────────────────────────────────
 // GET /users/:id/volumes
-// Objectif : lister les volumes dont l’utilisateur est propriétaire
+// Objectif : lister les volumes d’un user
+// Sécurité : seulement soi-même OU ADMIN
 // ─────────────────────────────────────────────────────────────
 //
 
 pub async fn list_user_volumes(
-    Extension(auth): Extension<AuthUser>, // ✅ user connecté
+    Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
     Path(user_id): Path<Uuid>,
 ) -> Result<Json<Vec<Volume>>, (StatusCode, String)> {
-
-    // ✅ Protection simple : un USER ne peut lister que SES volumes
+    // Un USER ne peut lister que ses propres volumes
     // ADMIN peut lister ceux des autres
+    let is_self = auth.user_id == user_id;
     let is_admin = require_role(&auth.role, &UserRole::ADMIN);
-    if auth.user_id != user_id && !is_admin {
-        return Err((StatusCode::FORBIDDEN, "Owner or ADMIN required".into()));
+
+    if !is_self && !is_admin {
+        return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
 
     let list = sqlx::query_as::<_, Volume>(
-        r#"
-        SELECT *
-        FROM volumes
-        WHERE owner_id = $1
-        ORDER BY created_at DESC
-        "#
+        "SELECT * FROM volumes WHERE owner_id = $1 ORDER BY created_at DESC"
     )
     .bind(user_id)
     .fetch_all(&state.db)
@@ -136,7 +137,8 @@ pub async fn list_user_volumes(
 //
 // ─────────────────────────────────────────────────────────────
 // PATCH /volumes/:id
-// Objectif : renommer ou redimensionner un volume
+// Objectif : rename/resize
+// Sécurité : owner OU ADMIN
 // ─────────────────────────────────────────────────────────────
 //
 
@@ -152,24 +154,25 @@ pub async fn update_volume(
     Path(id): Path<Uuid>,
     Json(payload): Json<UpdateVolumeRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-
-    // ✅ Vérifier owner OU admin
+    // 1) Récupérer owner_id pour vérifier droit
     let owner_id: Uuid = sqlx::query_scalar("SELECT owner_id FROM volumes WHERE id = $1")
         .bind(id)
         .fetch_one(&state.db)
         .await
         .map_err(|_| (StatusCode::NOT_FOUND, "Volume not found".into()))?;
 
+    let is_owner = owner_id == auth.user_id;
     let is_admin = require_role(&auth.role, &UserRole::ADMIN);
-    if auth.user_id != owner_id && !is_admin {
-        return Err((StatusCode::FORBIDDEN, "Owner or ADMIN required".into()));
+
+    if !is_owner && !is_admin {
+        return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
 
+    // 2) Update
     let res = sqlx::query(
         r#"
         UPDATE volumes
-        SET
-            name = COALESCE($1, name),
+        SET name = COALESCE($1, name),
             size_bytes = COALESCE($2, size_bytes),
             updated_at = now()
         WHERE id = $3
@@ -192,7 +195,8 @@ pub async fn update_volume(
 //
 // ─────────────────────────────────────────────────────────────
 // DELETE /volumes/:id
-// Objectif : supprimer définitivement un volume
+// Objectif : supprimer un volume
+// Sécurité : owner OU ADMIN
 // ─────────────────────────────────────────────────────────────
 //
 
@@ -201,19 +205,21 @@ pub async fn delete_volume(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-
-    // ✅ Vérifier owner OU admin
+    // 1) Vérif droit via owner_id
     let owner_id: Uuid = sqlx::query_scalar("SELECT owner_id FROM volumes WHERE id = $1")
         .bind(id)
         .fetch_one(&state.db)
         .await
         .map_err(|_| (StatusCode::NOT_FOUND, "Volume not found".into()))?;
 
+    let is_owner = owner_id == auth.user_id;
     let is_admin = require_role(&auth.role, &UserRole::ADMIN);
-    if auth.user_id != owner_id && !is_admin {
-        return Err((StatusCode::FORBIDDEN, "Owner or ADMIN required".into()));
+
+    if !is_owner && !is_admin {
+        return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
 
+    // 2) Delete
     let res = sqlx::query("DELETE FROM volumes WHERE id = $1")
         .bind(id)
         .execute(&state.db)

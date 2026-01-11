@@ -28,6 +28,7 @@ use crate::api::auth::{AuthUser, require_role};
 // ─────────────────────────────────────────────────────────────
 // POST /users
 // Objectif : créer un nouvel utilisateur BindKey
+// RBAC : seul ENROLLER / ADMIN peut créer des utilisateurs
 // ─────────────────────────────────────────────────────────────
 //
 
@@ -45,9 +46,15 @@ pub struct CreateUserResponse {
 }
 
 pub async fn create_user(
+    Extension(auth): Extension<AuthUser>, //  utilisateur authentifié (middleware)
     State(state): State<AppState>,
     Json(payload): Json<CreateUserRequest>,
 ) -> Result<Json<CreateUserResponse>, String> {
+
+    // RBAC : ENROLLER ou ADMIN
+    if !require_role(&auth.role, &UserRole::ENROLLER) {
+        return Err("ENROLLER/ADMIN required".into());
+    }
 
     let user_id = Uuid::new_v4();
     let role = UserRole::USER;
@@ -81,13 +88,27 @@ pub async fn create_user(
 //
 // ─────────────────────────────────────────────────────────────
 // GET /users/:id
+// Objectif : récupérer un utilisateur par son ID
+//  RBAC :
+// - USER peut lire uniquement son propre profil
+// - ENROLLER/ADMIN peuvent lire n’importe quel profil
 // ─────────────────────────────────────────────────────────────
 //
 
 pub async fn get_user_by_id(
+    Extension(auth): Extension<AuthUser>, // ✅ utilisateur authentifié
     State(state): State<AppState>,
     Path(user_id): Path<Uuid>,
 ) -> Result<Json<User>, (StatusCode, String)> {
+
+    // USER : accès uniquement à lui-même
+    // ENROLLER/ADMIN : accès à tous
+    let is_self = auth.user_id == user_id;
+    let can_read_any = require_role(&auth.role, &UserRole::ENROLLER);
+
+    if !is_self && !can_read_any {
+        return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
+    }
 
     let user = sqlx::query_as::<_, User>(
         "SELECT * FROM users WHERE id = $1"
@@ -106,6 +127,8 @@ pub async fn get_user_by_id(
 //
 // ─────────────────────────────────────────────────────────────
 // GET /users?email=...
+// Objectif : retrouver un utilisateur via son email
+// RBAC : ENROLLER/ADMIN uniquement (évite l’énumération d’emails)
 // ─────────────────────────────────────────────────────────────
 //
 
@@ -115,9 +138,15 @@ pub struct UserEmailQuery {
 }
 
 pub async fn get_user_by_email(
+    Extension(auth): Extension<AuthUser>, //  utilisateur authentifié
     State(state): State<AppState>,
     Query(q): Query<UserEmailQuery>,
 ) -> Result<Json<User>, (StatusCode, String)> {
+
+    // RBAC : ENROLLER ou ADMIN
+    if !require_role(&auth.role, &UserRole::ENROLLER) {
+        return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
+    }
 
     let user = sqlx::query_as::<_, User>(
         "SELECT * FROM users WHERE email = $1"
@@ -137,7 +166,7 @@ pub async fn get_user_by_email(
 // ─────────────────────────────────────────────────────────────
 // PATCH /users/:id/status
 // Objectif : activer / désactiver un compte utilisateur
-// (ADMIN / ENROLLER)
+// RBAC : ENROLLER / ADMIN
 // ─────────────────────────────────────────────────────────────
 //
 
@@ -147,7 +176,7 @@ pub struct UpdateUserStatusRequest {
 }
 
 pub async fn update_user_status(
-    Extension(auth): Extension<AuthUser>, // ✅ utilisateur authentifié
+    Extension(auth): Extension<AuthUser>, // utilisateur authentifié
     State(state): State<AppState>,
     Path(user_id): Path<Uuid>,
     Json(payload): Json<UpdateUserStatusRequest>,
