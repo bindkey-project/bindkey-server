@@ -1,0 +1,27 @@
+name: Rust CI Develop
+
+on:
+  push:
+    branches: [ "develop" ]
+  pull_request:
+    branches: [ "develop" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout du code
+      uses: actions/checkout@v4
+
+    - name: Configuration du Cache Rust
+      uses: Swatinem/rust-cache@v2
+
+    - name: Build (Compilation)
+      run: cargo build --verbose
+
+    - name: Run tests (Tests unitaires)
+      run: cargo test --verbose

@@ -19,6 +19,7 @@ async fn main() {
     dotenv().ok();
 
     // 1) Logs
+    dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .init();
