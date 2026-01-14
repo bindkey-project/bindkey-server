@@ -50,24 +50,18 @@ pub async fn enroll_bindkey(
     Json(payload): Json<EnrollBindkeyRequest>, // Body JSON
 ) -> Result<Json<EnrollBindkeyResponse>, (StatusCode, String)> {
 
-    // Génération d’un UUID pour la nouvelle BindKey
+    // 1. Génération d’un UUID pour la nouvelle BindKey
     let bindkey_id = Uuid::new_v4();
 
-    // Requête SQL d’insertion
-    // → statut initial forcé à ACTIVE
+    // 2. Requête SQL d’insertion
     let query = r#"
         INSERT INTO bindkeys (
-            id,
-            user_id,
-            bindkey_uid,
-            fingerprint_template,
-            public_key,
-            status
+            id, user_id, bindkey_uid, fingerprint_template, public_key, status
         )
         VALUES ($1, $2, $3, $4, $5, 'ACTIVE')
     "#;
 
-    // Exécution SQL avec binding sécurisé
+    // 3. Exécution SQL avec gestion fine des erreurs
     sqlx::query(query)
         .bind(bindkey_id)
         .bind(payload.user_id)
@@ -76,12 +70,35 @@ pub async fn enroll_bindkey(
         .bind(&payload.public_key)
         .execute(&state.db)
         .await
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Enroll BindKey failed: {}", e)
-        ))?;
+        .map_err(|e| {
+            // --- JE DÉBUTE L'AMÉLIORATION ICI ---
+            if let Some(db_error) = e.as_database_error() {
+                // Code 23505 = Violation d'unicité (Doublon de clé)
+                if db_error.code() == Some(std::borrow::Cow::Borrowed("23505")) {
+                    return (
+                        StatusCode::CONFLICT, // Code HTTP 409
+                        "Erreur : Cette BindKey est déjà associée à un utilisateur.".into()
+                    );
+                }
+                
+                // Code 23503 = Violation de clé étrangère (L'utilisateur n'existe pas)
+                if db_error.code() == Some(std::borrow::Cow::Borrowed("23503")) {
+                    return (
+                        StatusCode::NOT_FOUND, // Code HTTP 404
+                        "Erreur : L'utilisateur spécifié est introuvable.".into()
+                    );
+                }
+            }
 
-    // Réponse OK
+            // Si c'est une autre erreur inconnue, on garde le 500
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Erreur serveur interne : {}", e)
+            )
+            // --- FIN DE L'AMÉLIORATION ---
+        })?;
+
+    // 4. Réponse OK
     Ok(Json(EnrollBindkeyResponse {
         bindkey_id,
         message: "BindKey enrolled successfully".into(),

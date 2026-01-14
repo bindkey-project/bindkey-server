@@ -6,7 +6,6 @@ use serde::{Serialize, Deserialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
-use crate::api::models::user::{UserRole, UserStatus};
 
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]

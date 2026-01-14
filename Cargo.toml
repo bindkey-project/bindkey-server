@@ -44,4 +44,12 @@ uuid = { version = "1.19.0", features = ["v4", "serde"] }
 
 # Gestion des dates/timestamps PostgreSQL (TIMESTAMPTZ)
 chrono = { version = "0.4.42", features = ["serde"] }
+tower = { version = "0.5.3", features = ["util"] }
 
+[lib]
+name = "bindkey_server"  # J'utilise l'underscore ici (_)
+path = "src/main.rs"
+
+[[test]]
+name = "bindkey_tests"
+path = "Tests/bindkey_tests.rs"

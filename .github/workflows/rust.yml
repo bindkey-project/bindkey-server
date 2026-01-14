@@ -1,27 +1,31 @@
-name: Rust CI Develop
+name: Rust CI Quality & Security
 
 on:
   push:
-    branches: [ "develop" ]
+    branches: [ "develop", "marwa-version" ] # Surveillance de ta branche
   pull_request:
-    branches: [ "develop" ]
+    branches: [ "develop", "marwa-version" ]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  security_and_quality:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout du code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+    - uses: Swatinem/rust-cache@v2
 
-    - name: Configuration du Cache Rust
-      uses: Swatinem/rust-cache@v2
+    # ÉTAPE SÉCURITÉ : Vérifie les failles dans les librairies (axum, sqlx, etc.)
+    - name: Installation de cargo-audit
+      run: cargo install cargo-audit
+    - name: Audit de sécurité des dépendances
+      run: cargo audit
 
-    - name: Build (Compilation)
-      run: cargo build --verbose
+    # ÉTAPE QUALITÉ : Clippy est ton "mentor" pour coder proprement
+    - name: Analyse statique (Clippy)
+      run: cargo clippy -- -D warnings
 
-    - name: Run tests (Tests unitaires)
+    # ÉTAPE TESTS : Exécution des tests de sécurité
+    - name: Run Tests
       run: cargo test --verbose
