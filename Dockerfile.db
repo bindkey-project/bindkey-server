@@ -1,0 +1,5 @@
+FROM postgres:16-alpine
+# On définit les variables par défaut pour l'image
+ENV POSTGRES_USER=bindkey
+ENV POSTGRES_PASSWORD=
+ENV POSTGRES_DB=bindkey

@@ -26,8 +26,6 @@ pub struct Session {
     // Expiration de la session
     pub expires_at: DateTime<Utc>,
 
-    // Appareil utilisé
-    pub device_id: Option<Uuid>,
 
     pub created_at: DateTime<Utc>,
 }

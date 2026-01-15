@@ -26,14 +26,10 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 dotenvy = "0.15"
 
 # ORM async pour PostgreSQL + support UUID/chrono + macros + migrations
-sqlx = { version = "0.7", features = [
-    "postgres",
-    "uuid",
-    "chrono",
-    "runtime-tokio-native-tls",
-    "macros",
-    "migrate"
-] }
+# On désactive les "default-features" pour ne garder que le strict nécessaire
+# On configure sqlx sans les drivers par défaut
+sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls", "uuid", "chrono", "migrate", "macros"] }
+
 
 # Sérialisation/désérialisation JSON (Serialize / Deserialize)
 serde = { version = "1.0.228", features = ["derive"] }
@@ -44,6 +40,7 @@ uuid = { version = "1.19.0", features = ["v4", "serde"] }
 
 # Gestion des dates/timestamps PostgreSQL (TIMESTAMPTZ)
 chrono = { version = "0.4.42", features = ["serde"] }
+tower = { version = "0.5.3", features = ["util"] }
 
 # Hash sécurisé des secrets (recovery code, mots de passe, etc.)
 # → recommandé pour la sécurité (résistant aux attaques par brute-force)
@@ -58,3 +55,27 @@ rand = "0.8"
 time = "0.3"
 
 hex = "0.4"
+
+[lib]
+name = "bindkey_server"  # J'utilise l'underscore ici (_)
+path = "src/main.rs"
+
+[[test]]
+name = "bindkey_tests"
+path = "Tests/bindkey_tests.rs"
+[[test]]
+name = "disk_tests"
+path = "Tests/disk_tests.rs"
+[[test]]
+name = "volume_tests"
+path = "Tests/volume_tests.rs"
+[[test]]
+name = "session_tests"
+path = "Tests/session_tests.rs"
+[[test]]
+name = "mount_tests"
+path = "Tests/mount_tests.rs"
+[[test]]
+name = "permission_tests"
+path = "Tests/permission_tests.rs"
+

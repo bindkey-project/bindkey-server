@@ -1,0 +1,85 @@
+# --- 1. STOCKAGE ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bindkey-db-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+# --- 2. DÉPLOIEMENT ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bindkey-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bindkey
+  template:
+    metadata:
+      labels:
+        app: bindkey
+    spec:
+      imagePullSecrets:
+        - name: ghcr-auth
+      containers:
+        # --- COMPOSANT : API SERVEUR ---
+        - name: bindkey-api
+          image: ghcr.io/bindkey-project/bindkey-server/bindkey-server:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: bindkey-db-secrets
+                  key: dburl
+
+        # --- COMPOSANT : BASE DE DONNÉES ---
+        - name: bindkey-db
+          image: ghcr.io/bindkey-project/bindkey-server/bindkey-db:latest
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: bindkey-db-secrets
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: bindkey-db-secrets
+                  key: password
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: bindkey-db-secrets
+                  key: dbname
+          volumeMounts:
+            - name: bindkey-db-storage
+              mountPath: /var/lib/postgresql/data
+      
+      volumes:
+        - name: bindkey-db-storage
+          persistentVolumeClaim:
+            claimName: bindkey-db-pvc
+---
+# --- 3. SERVICE ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bindkey-service
+spec:
+  type: NodePort
+  selector:
+    app: bindkey
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30080

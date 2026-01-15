@@ -1,27 +1,86 @@
-name: Rust CI Develop
+name: Rust CI Quality & Security
 
 on:
   push:
-    branches: [ "develop" ]
+    branches: [ "develop", "marwa-version" ]
   pull_request:
-    branches: [ "develop" ]
+    branches: [ "develop", "marwa-version" ]
 
 env:
   CARGO_TERM_COLOR: always
+  DATABASE_URL: postgres://bindkey:bindkey@localhost:5432/bindkey
+  # On définit les noms d'images pour GHCR
+  SERVER_IMAGE: ghcr.io/${{ github.repository }}/bindkey-server
+  DB_IMAGE: ghcr.io/${{ github.repository }}/bindkey-db
 
 jobs:
-  build:
+  # --- JOB 1 : TESTS ET SÉCURITÉ ---
+  security_and_quality:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bindkey      
+          POSTGRES_PASSWORD: bindkey 
+          POSTGRES_DB: bindkey        
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
-    - name: Checkout du code
-      uses: actions/checkout@v4
-
-    - name: Configuration du Cache Rust
+    - uses: actions/checkout@v4
+    - name: Rust Cache
       uses: Swatinem/rust-cache@v2
-
-    - name: Build (Compilation)
-      run: cargo build --verbose
-
-    - name: Run tests (Tests unitaires)
+    - name: Installation de cargo-audit
+      run: cargo install cargo-audit
+    - name: Audit de sécurité des dépendances
+      run: cargo audit --ignore RUSTSEC-2023-0071
+    - name: Install SQLx CLI and run migrations
+      run: |
+        cargo install sqlx-cli --no-default-features --features postgres
+        sqlx migrate run
+    - name: Analyse statique (Clippy)
+      run: cargo clippy
+    - name: Run Tests
       run: cargo test --verbose
+
+  # --- JOB 2 : BUILD ET PUSH DES IMAGES (GHCR) ---
+  build_and_push:
+    needs: security_and_quality # On ne build que si les tests passent
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # Indispensable pour pousser sur GHCR
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    # Construction de l'image du SERVEUR
+    - name: Build and push Server Image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        push: true
+        tags: ${{ env.SERVER_IMAGE }}:latest,${{ env.SERVER_IMAGE }}:${{ github.sha }}
+
+    # Construction de l'image de la DATABASE
+    - name: Build and push DB Image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile.db
+        push: true
+        tags: ${{ env.DB_IMAGE }}:latest,${{ env.DB_IMAGE }}:${{ github.sha }}

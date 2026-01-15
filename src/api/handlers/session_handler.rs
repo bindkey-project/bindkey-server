@@ -4,6 +4,7 @@ use chrono::{Utc, Duration};
 use crate::db::AppState;
 use crate::api::models::session::Session;
 
+
 #[derive(serde::Deserialize)]
 pub struct LoginRequest {
     pub user_id: Uuid,
@@ -55,28 +56,31 @@ pub async fn refresh_session(
     State(state): State<AppState>,
     Json(payload): Json<RefreshRequest>,
 ) -> Result<Json<LoginResponse>, (StatusCode, String)> {
-    // retrouver session
+    
+    // 1. On récupère la session
     let s = sqlx::query_as::<_, Session>("SELECT * FROM sessions WHERE server_token = $1")
         .bind(&payload.server_token)
         .fetch_one(&state.db)
         .await
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid session".into()))?;
+        .map_err(|e| {
+            println!("DEBUG: Token recherché '{}' non trouvé. Erreur: {:?}", payload.server_token, e);
+            (StatusCode::UNAUTHORIZED, "Invalid session".into())
+        })?;
 
-    // nouvelles valeurs
+    // 2. On prépare les nouvelles valeurs
     let new_server_token = Uuid::new_v4().to_string();
     let new_local_token = Uuid::new_v4().to_string();
     let new_expires = Utc::now() + chrono::Duration::minutes(30);
 
-    sqlx::query(
-        "UPDATE sessions SET server_token=$1, local_token=$2, expires_at=$3 WHERE id=$4"
-    )
-    .bind(&new_server_token)
-    .bind(&new_local_token)
-    .bind(new_expires)
-    .bind(s.id)
-    .execute(&state.db)
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
+    // 3. On met à jour
+    sqlx::query("UPDATE sessions SET server_token=$1, local_token=$2, expires_at=$3 WHERE id=$4")
+        .bind(&new_server_token)
+        .bind(&new_local_token)
+        .bind(new_expires)
+        .bind(s.id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
 
     Ok(Json(LoginResponse {
         session_id: s.id,
@@ -85,7 +89,6 @@ pub async fn refresh_session(
         expires_at: new_expires,
     }))
 }
-
 #[derive(serde::Deserialize)]
 pub struct LogoutRequest {
     pub server_token: String,

@@ -1,0 +1,6 @@
+[advisories]
+
+ignore = ["RUSTSEC-2023-0071"]
+# Raison : La vulnérabilité est dans sqlx-mysql/rsa. 
+# BindKey utilise exclusivement PostgreSQL. 
+# Confirmé par 'cargo tree' : le code vulnérable n'est pas compilé.

@@ -6,9 +6,23 @@ use axum::{
 };
 use uuid::Uuid;
 
+// Chrono pour manipuler les dates (timestamps)
+
+// Accès à la connexion PostgreSQL via AppState
+
 use crate::db::AppState;
 use crate::api::auth::{AuthUser, require_role};
 use crate::api::models::user::UserRole;
+
+// Modèle représentant un volume monté (utilisé surtout pour cohérence métier)
+
+//
+// ─────────────────────────────────────────────────────────────
+// STRUCTURES DE DONNÉES
+// ─────────────────────────────────────────────────────────────
+//
+
+// Données reçues lors du montage d’un volume
 
 #[derive(serde::Deserialize)]
 pub struct MountRequest {

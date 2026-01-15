@@ -37,6 +37,10 @@ pub struct CreateUserRequest {
     pub first_name: String,
     pub last_name: String,
     pub email: String,
+    pub first_name: String,  // Prénom
+    pub last_name: String,   // Nom
+    pub email: String,   
+    pub role: UserRole,   
 }
 
 #[derive(serde::Serialize)]
@@ -58,6 +62,11 @@ pub async fn create_user(
 
     let user_id = Uuid::new_v4();
     let role = UserRole::USER;
+
+
+    // 2️⃣ Valeurs par défaut
+                  // Rôle standard
+
     let recovery_code_hash = "TODO_HASH".to_string();
 
     let query = r#"
@@ -73,7 +82,7 @@ pub async fn create_user(
         .bind(&payload.first_name)
         .bind(&payload.last_name)
         .bind(&payload.email)
-        .bind(role)
+        .bind(&payload.role)
         .bind(recovery_code_hash)
         .execute(&state.db)
         .await
