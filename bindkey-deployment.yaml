@@ -1,3 +1,16 @@
+# --- 1. LA DEMANDE DE STOCKAGE ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+# --- 2. LE DÉPLOIEMENT ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -12,11 +25,10 @@ spec:
       labels:
         app: bindkey
     spec:
-      # On utilise le secret créé à l'étape précédente
       imagePullSecrets:
         - name: ghcr-auth
       containers:
-        # --- CONTENEUR 1 : LE SERVEUR RUST ---
+        # --- LE SERVEUR RUST ---
         - name: server
           image: ghcr.io/bindkey-project/bindkey-server/bindkey-server:latest
           ports:
@@ -25,12 +37,29 @@ spec:
             - name: DATABASE_URL
               value: "postgres://bindkey:bindkey@localhost:5432/bindkey"
 
-        # --- CONTENEUR 2 : LA BASE DE DONNÉES ---
+        # --- LA BASE DE DONNÉES POSTGRES ---
         - name: db
           image: ghcr.io/bindkey-project/bindkey-server/bindkey-db:latest
           ports:
             - containerPort: 5432
+          # ON REPRÉCISE LES ENV POUR LA DB
+          env:
+            - name: POSTGRES_USER
+              value: "bindkey"
+            - name: POSTGRES_PASSWORD
+              value: "bindkey"
+            - name: POSTGRES_DB
+              value: "bindkey"
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+      
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: postgres-pvc
 ---
+# --- 3. LE SERVICE (Pour accéder à l'API) ---
 apiVersion: v1
 kind: Service
 metadata:
@@ -42,4 +71,4 @@ spec:
   ports:
     - port: 8080
       targetPort: 8080
-      nodePort: 30080 # Le serveur sera accessible sur ce port
+      nodePort: 30080
