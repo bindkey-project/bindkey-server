@@ -26,14 +26,10 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 dotenvy = "0.15"
 
 # ORM async pour PostgreSQL + support UUID/chrono + macros + migrations
-sqlx = { version = "0.7", features = [
-    "postgres",
-    "uuid",
-    "chrono",
-    "runtime-tokio-native-tls",
-    "macros",
-    "migrate"
-] }
+# On désactive les "default-features" pour ne garder que le strict nécessaire
+# On configure sqlx sans les drivers par défaut
+sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls", "uuid", "chrono", "migrate", "macros"] }
+
 
 # Sérialisation/désérialisation JSON (Serialize / Deserialize)
 serde = { version = "1.0.228", features = ["derive"] }

@@ -20,9 +20,12 @@ jobs:
     - name: Installation de cargo-audit
       run: cargo install cargo-audit
     - name: Audit de sécurité des dépendances
-      run: cargo audit
+      # On ignore la faille RSA/MySQL car nous utilisons PostgreSQL (Faux positif validé)
+      run: cargo audit --ignore RUSTSEC-2023-0071
 
-    # ÉTAPE QUALITÉ : Clippy est ton "mentor" pour coder proprement
+      # Ajouter Static Analysis
+
+    # ÉTAPE QUALITÉ : Clippy  coder proprement
     - name: Analyse statique (Clippy)
       run: cargo clippy -- -D warnings
 
