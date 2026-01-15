@@ -4,7 +4,7 @@
 [package]
 name = "bindkey-server"       # Nom du binaire généré (bindkey-server)
 version = "0.1.0"             # Version de ton application
-edition = "2024"              # Version du langage Rust utilisée (la plus récente)
+edition = "2021"              # Version du langage Rust utilisée (la plus récente)
 
 
 # ─────────────────────────────────────────────
