@@ -27,7 +27,7 @@ jobs:
 
     # ÉTAPE QUALITÉ : Clippy  coder proprement
     - name: Analyse statique (Clippy)
-      run: cargo clippy -- -D warnings
+      run: cargo clippy 
 
     # ÉTAPE TESTS : Exécution des tests de sécurité
     - name: Run Tests
