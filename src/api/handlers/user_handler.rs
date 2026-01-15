@@ -34,9 +34,6 @@ use crate::api::auth::{AuthUser, require_role};
 
 #[derive(serde::Deserialize)]
 pub struct CreateUserRequest {
-    pub first_name: String,
-    pub last_name: String,
-    pub email: String,
     pub first_name: String,  // Prénom
     pub last_name: String,   // Nom
     pub email: String,   
