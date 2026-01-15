@@ -34,5 +34,5 @@ pub struct VolumePermission {
 #[sqlx(type_name = "permission_level", rename_all = "UPPERCASE")]
 pub enum PermissionLevel {
     READ,
-    READ_WRITE,
+    ReadWrite,
 }

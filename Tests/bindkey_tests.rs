@@ -94,3 +94,100 @@ async fn test_full_security_and_enrollment_flow() {
     
     println!("Résultat : La sécurité a bien bloqué le doublon avec un code 409 propre.");
 }
+
+#[tokio::test]
+async fn test_get_user_bindkeys_list() {
+    let app = create_app_instance().await;
+    
+    // 1. Création d'un user
+    let user_id = Uuid::new_v4();
+    // (Note: Dans un vrai test, on créerait l'user en DB d'abord, 
+    // mais ici on teste la réponse de la route GET)
+
+    // 2. Appel de la route GET /users/:id/bindkeys
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/users/{}/bindkeys", user_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    println!("\n--- TEST : LISTE DES CLÉS ---");
+    println!("Statut reçu : {} ({:?})", response.status().as_u16(), response.status().canonical_reason());
+
+    // On s'attend à un 200 OK (même si la liste est vide [])
+    assert!(response.status().is_success());
+}
+
+#[tokio::test]
+async fn test_get_bindkey_not_found() {
+    let app = create_app_instance().await;
+    let fake_id = Uuid::new_v4();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/bindkeys/{}", fake_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    println!("\n--- TEST : BINDKEY INCONNUE ---");
+    println!("Statut reçu : {} ({:?})", response.status().as_u16(), response.status().canonical_reason());
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_get_user_bindkeys_list_content() {
+    let app = create_app_instance().await;
+    
+    // 1. On crée d'abord un utilisateur (nécessaire pour la FK)
+    let user_email = format!("list_test_{}@test.com", Uuid::new_v4());
+    let user_res = app.clone().oneshot(
+        Request::builder().method("POST").uri("/users")
+            .header("Content-Type", "application/json")
+            .body(Body::from(serde_json::to_vec(&json!({"first_name": "List", "last_name": "Tester", "email": user_email})).unwrap())).unwrap()
+    ).await.unwrap();
+    
+    let body_bytes = body::to_bytes(user_res.into_body(), usize::MAX).await.unwrap();
+    let user_id: Value = serde_json::from_slice(&body_bytes).unwrap();
+    let user_id_uuid = user_id["id"].as_str().unwrap();
+
+    // 2. On enrôle une clé pour cet utilisateur
+    let bindkey_uid = format!("BK-LIST-{}", Uuid::new_v4());
+    app.clone().oneshot(
+        Request::builder().method("POST").uri("/bindkeys/enroll")
+            .header("Content-Type", "application/json")
+            .body(Body::from(serde_json::to_vec(&json!({
+                "user_id": user_id_uuid,
+                "bindkey_uid": bindkey_uid,
+                "public_key": "key_list_test",
+                "fingerprint_template": "template_list_test"
+            })).unwrap())).unwrap()
+    ).await.unwrap();
+
+    // 3. On demande la liste des clés de cet utilisateur
+    let response = app.oneshot(
+        Request::builder().method("GET").uri(format!("/users/{}/bindkeys", user_id_uuid))
+            .body(Body::empty()).unwrap()
+    ).await.unwrap();
+
+    println!("\n--- TEST : CONTENU DE LA LISTE ---");
+    let status = response.status();
+    let body_bytes = body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let list: Vec<Value> = serde_json::from_slice(&body_bytes).unwrap();
+
+    println!("Statut : {}, Nombre de clés trouvées : {}", status, list.len());
+
+    assert!(status.is_success());
+    assert!(!list.is_empty(), "La liste ne devrait pas être vide après un enrôlement !");
+    assert_eq!(list[0]["bindkey_uid"], bindkey_uid, "Le bindkey_uid reçu ne correspond pas à celui créé");
+}

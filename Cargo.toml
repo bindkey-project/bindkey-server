@@ -53,3 +53,18 @@ path = "src/main.rs"
 [[test]]
 name = "bindkey_tests"
 path = "Tests/bindkey_tests.rs"
+[[test]]
+name = "disk_tests"
+path = "Tests/disk_tests.rs"
+[[test]]
+name = "volume_tests"
+path = "Tests/volume_tests.rs"
+[[test]]
+name = "session_tests"
+path = "Tests/session_tests.rs"
+[[test]]
+name = "mount_tests"
+path = "Tests/mount_tests.rs"
+[[test]]
+name = "permission_tests"
+path = "Tests/permission_tests.rs"
