@@ -2,33 +2,54 @@ name: Rust CI Quality & Security
 
 on:
   push:
-    branches: [ "develop", "marwa-version" ] # Surveillance de ta branche
+    branches: [ "develop", "marwa-version" ]
   pull_request:
     branches: [ "develop", "marwa-version" ]
 
 env:
   CARGO_TERM_COLOR: always
+  # SYNCHRONISÉ : On utilise les mêmes identifiants que ton docker-compose
+  DATABASE_URL: postgres://bindkey:bindkey@localhost:5432/bindkey
 
 jobs:
   security_and_quality:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16 # On utilise la même version (16) que ton docker
+        env:
+          POSTGRES_USER: bindkey      
+          POSTGRES_PASSWORD: bindkey 
+          POSTGRES_DB: bindkey        
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
     - uses: actions/checkout@v4
-    - uses: Swatinem/rust-cache@v2
 
-    # ÉTAPE SÉCURITÉ : Vérifie les failles dans les librairies (axum, sqlx, etc.)
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@v2
+
     - name: Installation de cargo-audit
       run: cargo install cargo-audit
+    
     - name: Audit de sécurité des dépendances
-      # On ignore la faille RSA/MySQL car nous utilisons PostgreSQL (Faux positif validé)
       run: cargo audit --ignore RUSTSEC-2023-0071
 
-      # Ajouter Static Analysis
+    # IMPORTANT : SQLx a besoin des migrations pour que les tests fonctionnent
+    - name: Install SQLx CLI and run migrations
+      run: |
+        cargo install sqlx-cli --no-default-features --features postgres
+        sqlx migrate run
 
-    # ÉTAPE QUALITÉ : Clippy  coder proprement
     - name: Analyse statique (Clippy)
-      run: cargo clippy 
+      run: cargo clippy
 
-    # ÉTAPE TESTS : Exécution des tests de sécurité
     - name: Run Tests
       run: cargo test --verbose
