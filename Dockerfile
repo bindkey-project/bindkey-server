@@ -1,18 +1,31 @@
-# --- Builder stage ---
-FROM rust:1.84-slim AS builder
+# --- Stage 1: Build (Obligatoire: Nightly pour l'Edition 2024) ---
+FROM rustlang/rust:nightly-slim AS builder
+
 WORKDIR /app
-RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+
+# Dépendances pour la compilation (OpenSSL & Pkg-config)
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY . .
+
+# On compile en Release avec le compilateur Nightly
 RUN cargo build --release
 
-# --- Runtime stage ---
+# --- Stage 2: Runtime ---
 FROM debian:bookworm-slim
 WORKDIR /app
-RUN apt-get update && apt-get install -y libssl3 ca-certificates && rm -rf /var/lib/apt/lists/*
-# On récupère le binaire et les fichiers de migration
+
+# Installation des certificats et de libssl pour le binaire final
+RUN apt-get update && apt-get install -y \
+    libssl3 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /app/target/release/bindkey-server .
 COPY --from=builder /app/migrations ./migrations
 
 EXPOSE 8080
-# Le serveur lancera les migrations au démarrage ou via un script
 CMD ["./bindkey-server"]
