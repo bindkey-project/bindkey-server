@@ -1,8 +1,8 @@
-# --- 1. LA DEMANDE DE STOCKAGE ---
+# --- 1. STOCKAGE ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: postgres-pvc
+  name: bindkey-db-pvc
 spec:
   accessModes:
     - ReadWriteOnce
@@ -10,11 +10,11 @@ spec:
     requests:
       storage: 1Gi
 ---
-# --- 2. LE DÉPLOIEMENT ---
+# --- 2. DÉPLOIEMENT ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: bindkey-app
+  name: bindkey-deployment
 spec:
   replicas: 1
   selector:
@@ -28,38 +28,49 @@ spec:
       imagePullSecrets:
         - name: ghcr-auth
       containers:
-        # --- LE SERVEUR RUST ---
-        - name: server
+        # --- COMPOSANT : API SERVEUR ---
+        - name: bindkey-api
           image: ghcr.io/bindkey-project/bindkey-server/bindkey-server:latest
           ports:
             - containerPort: 8080
           env:
             - name: DATABASE_URL
-              value: "postgres://bindkey:bindkey@localhost:5432/bindkey"
+              valueFrom:
+                secretKeyRef:
+                  name: bindkey-db-secrets
+                  key: dburl
 
-        # --- LA BASE DE DONNÉES POSTGRES ---
-        - name: db
+        # --- COMPOSANT : BASE DE DONNÉES ---
+        - name: bindkey-db
           image: ghcr.io/bindkey-project/bindkey-server/bindkey-db:latest
           ports:
             - containerPort: 5432
-          # ON REPRÉCISE LES ENV POUR LA DB
           env:
             - name: POSTGRES_USER
-              value: "bindkey"
+              valueFrom:
+                secretKeyRef:
+                  name: bindkey-db-secrets
+                  key: username
             - name: POSTGRES_PASSWORD
-              value: "bindkey"
+              valueFrom:
+                secretKeyRef:
+                  name: bindkey-db-secrets
+                  key: password
             - name: POSTGRES_DB
-              value: "bindkey"
+              valueFrom:
+                secretKeyRef:
+                  name: bindkey-db-secrets
+                  key: dbname
           volumeMounts:
-            - name: postgres-data
+            - name: bindkey-db-storage
               mountPath: /var/lib/postgresql/data
       
       volumes:
-        - name: postgres-data
+        - name: bindkey-db-storage
           persistentVolumeClaim:
-            claimName: postgres-pvc
+            claimName: bindkey-db-pvc
 ---
-# --- 3. LE SERVICE (Pour accéder à l'API) ---
+# --- 3. SERVICE ---
 apiVersion: v1
 kind: Service
 metadata:
