@@ -50,6 +50,9 @@ argon2 = "0.5"
 # → utilisé pour créer des codes uniques (recovery code, tokens, etc.)
 rand = "0.8"
 
+# Pour encoder le code en Base64 URL-safe 
+base64 = "0.22"
+
 # Gestion du temps (durées, timestamps, expiration)
 # → utile pour tokens, sessions, expiration des accès
 time = "0.3"
