@@ -8,6 +8,7 @@ pub type PgPool = Pool<Postgres>;
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
+   
 }
 
 /// Crée un pool de connexion PostgreSQL à partir d'une URL.

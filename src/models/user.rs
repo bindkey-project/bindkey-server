@@ -61,6 +61,7 @@ pub struct User {
     /// Date de création - TIMESTAMPTZ -> DateTime<Utc>
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub password_hash: String,
 }
 
 

@@ -1,10 +1,3 @@
-// Import Axum :
-// - Json : pour gérer les corps de requêtes/réponses JSON
-// - State : pour accéder à l’état global de l’application (DB)
-// - Path : pour lire les paramètres dans l’URL (/users/:id)
-// - Query : pour lire les paramètres de requête (?email=...)
-// - StatusCode : pour renvoyer des codes HTTP explicites
-// - Extension : récupérer AuthUser injecté par le middleware (RBAC)
 use axum::{
     Json,
     extract::{State, Path, Query},
@@ -38,6 +31,7 @@ pub struct CreateUserRequest {
     pub last_name: String,   // Nom
     pub email: String,   
     pub role: UserRole,   
+    pub password_hash: String,
 }
 
 #[derive(serde::Serialize)]
@@ -47,37 +41,48 @@ pub struct CreateUserResponse {
 }
 
 pub async fn create_user(
-    Extension(auth): Extension<AuthUser>, //  utilisateur authentifié (middleware)
+    // On remplace Extension par Option<Extension>
+    auth_opt: Option<Extension<AuthUser>>, 
     State(state): State<AppState>,
     Json(payload): Json<CreateUserRequest>,
 ) -> Result<Json<CreateUserResponse>, String> {
 
-    // RBAC : ENROLLER ou ADMIN
-    if !require_role(&auth.role, &UserRole::ENROLLER) {
-        return Err("ENROLLER/ADMIN required".into());
+    // On commente la vérification de rôle pour le moment
+    
+    if let Some(Extension(auth)) = auth_opt {
+        if !require_role(&auth.role, &UserRole::ENROLLER) {
+            return Err("ENROLLER/ADMIN required".into());
+        }
     }
+    
+
+  
 
     let user_id = Uuid::new_v4();
-
-    // 2️⃣ Valeurs par défaut
-                 
     let recovery_code_hash = "TODO_HASH".to_string();
 
-    let query = r#"
+   let query = r#"
         INSERT INTO users (
-            id, first_name, last_name, email,
-            job_title, role, status, recovery_code_hash
+            id, 
+            first_name, 
+            last_name, 
+            email,
+            role, 
+            status, 
+            password_hash, 
+            recovery_code_hash
         )
-        VALUES ($1, $2, $3, $4, NULL, $5, 'ACTIVE', $6)
+        VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6, $7)
     "#;
 
     sqlx::query(query)
-        .bind(user_id)
-        .bind(&payload.first_name)
-        .bind(&payload.last_name)
-        .bind(&payload.email)
-        .bind(&payload.role)
-        .bind(recovery_code_hash)
+        .bind(user_id)               // $1
+        .bind(&payload.first_name)    // $2
+        .bind(&payload.last_name)     // $3
+        .bind(&payload.email)         // $4
+        .bind(&payload.role)          // $5
+        .bind(&payload.password_hash) // $6 
+        .bind(recovery_code_hash)     // $7
         .execute(&state.db)
         .await
         .map_err(|e| format!("Erreur SQL: {}", e))?;
@@ -92,14 +97,11 @@ pub async fn create_user(
 // ─────────────────────────────────────────────────────────────
 // GET /users/:id
 // Objectif : récupérer un utilisateur par son ID
-//  RBAC :
-// - USER peut lire uniquement son propre profil
-// - ENROLLER/ADMIN peuvent lire n’importe quel profil
 // ─────────────────────────────────────────────────────────────
 //
 
 pub async fn get_user_by_id(
-    Extension(auth): Extension<AuthUser>, // ✅ utilisateur authentifié
+    Extension(auth): Extension<AuthUser>, // ✅ Utilisateur authentifié requis
     State(state): State<AppState>,
     Path(user_id): Path<Uuid>,
 ) -> Result<Json<User>, (StatusCode, String)> {
@@ -130,8 +132,6 @@ pub async fn get_user_by_id(
 //
 // ─────────────────────────────────────────────────────────────
 // GET /users?email=...
-// Objectif : retrouver un utilisateur via son email
-// RBAC : ENROLLER/ADMIN uniquement (évite l’énumération d’emails)
 // ─────────────────────────────────────────────────────────────
 //
 
@@ -141,7 +141,7 @@ pub struct UserEmailQuery {
 }
 
 pub async fn get_user_by_email(
-    Extension(auth): Extension<AuthUser>, //  utilisateur authentifié
+    Extension(auth): Extension<AuthUser>, // ✅ Utilisateur authentifié requis
     State(state): State<AppState>,
     Query(q): Query<UserEmailQuery>,
 ) -> Result<Json<User>, (StatusCode, String)> {
@@ -168,18 +168,16 @@ pub async fn get_user_by_email(
 //
 // ─────────────────────────────────────────────────────────────
 // PATCH /users/:id/status
-// Objectif : activer / désactiver un compte utilisateur
-// RBAC : ENROLLER / ADMIN
 // ─────────────────────────────────────────────────────────────
 //
 
 #[derive(serde::Deserialize)]
 pub struct UpdateUserStatusRequest {
-    pub status: UserStatus, // ACTIVE | DISABLED
+    pub status: UserStatus,
 }
 
 pub async fn update_user_status(
-    Extension(auth): Extension<AuthUser>, // utilisateur authentifié
+    Extension(auth): Extension<AuthUser>, // ✅ Utilisateur authentifié requis
     State(state): State<AppState>,
     Path(user_id): Path<Uuid>,
     Json(payload): Json<UpdateUserStatusRequest>,
