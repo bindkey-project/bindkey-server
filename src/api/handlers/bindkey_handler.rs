@@ -3,10 +3,12 @@
 // State     → accéder à l’état global (DB, config)
 // Path      → récupérer les paramètres dans l’URL
 // StatusCode→ renvoyer des codes HTTP propres
+// Extension → récupérer AuthUser injecté par le middleware (RBAC)
 use axum::{
     Json,
     extract::{State, Path},
     http::StatusCode,
+    Extension,
 };
 
 // UUID : identifiants uniques (users, bindkeys, etc.)
@@ -17,6 +19,10 @@ use crate::db::AppState;
 
 // Modèle Bindkey + enum de statut
 use crate::api::models::bindkey::{Bindkey, BindkeyStatus};
+
+// Auth (RBAC)
+use crate::api::auth::{AuthUser, require_role};
+use crate::api::models::user::UserRole;
 
 //
 // ─────────────────────────────────────────────────────────────
@@ -31,26 +37,32 @@ use crate::api::models::bindkey::{Bindkey, BindkeyStatus};
 /// Données reçues depuis le client lors de l’enrôlement
 #[derive(serde::Deserialize)]
 pub struct EnrollBindkeyRequest {
-    pub user_id: Uuid,              // Utilisateur propriétaire de la BindKey
-    pub bindkey_uid: String,        // Identifiant matériel unique
-    pub public_key: String,         // Clé publique (crypto)
+    pub user_id: Uuid,                // Utilisateur propriétaire de la BindKey
+    pub bindkey_uid: String,          // Identifiant matériel unique
+    pub public_key: String,           // Clé publique (crypto)
     pub fingerprint_template: String, // Empreinte biométrique (hashée)
 }
 
 /// Réponse envoyée après enrôlement réussi
 #[derive(serde::Serialize)]
 pub struct EnrollBindkeyResponse {
-    pub bindkey_id: Uuid,           // ID généré côté serveur
+    pub bindkey_id: Uuid, // ID généré côté serveur
     pub message: String,
 }
 
 /// Handler POST /bindkeys/enroll
 pub async fn enroll_bindkey(
-    State(state): State<AppState>,          // Accès DB
+    Extension(auth): Extension<AuthUser>,      // Utilisateur authentifié (middleware)
+    State(state): State<AppState>,             // Accès DB
     Json(payload): Json<EnrollBindkeyRequest>, // Body JSON
 ) -> Result<Json<EnrollBindkeyResponse>, (StatusCode, String)> {
 
-    // 1. Génération d’un UUID pour la nouvelle BindKey
+    // RBAC : seul ENROLLER/ADMIN peut enrôler
+    if !require_role(&auth.role, &UserRole::ENROLLER) {
+        return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
+    }
+
+    // Génération d’un UUID pour la nouvelle BindKey
     let bindkey_id = Uuid::new_v4();
 
     // 2. Requête SQL d’insertion
@@ -116,7 +128,7 @@ pub async fn enroll_bindkey(
 
 pub async fn get_bindkey(
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,           // UUID depuis l’URL
+    Path(id): Path<Uuid>, // UUID depuis l’URL
 ) -> Result<Json<Bindkey>, (StatusCode, String)> {
 
     let bindkey = sqlx::query_as::<_, Bindkey>(
@@ -178,10 +190,16 @@ pub struct UpdateBindkeyStatusRequest {
 }
 
 pub async fn update_bindkey_status(
+    Extension(auth): Extension<AuthUser>, // Utilisateur authentifié
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
     Json(payload): Json<UpdateBindkeyStatusRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+
+    // RBAC : seul ENROLLER/ADMIN
+    if !require_role(&auth.role, &UserRole::ENROLLER) {
+        return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
+    }
 
     let res = sqlx::query(
         "UPDATE bindkeys SET status = $1 WHERE id = $2"
@@ -215,14 +233,21 @@ pub async fn update_bindkey_status(
 #[derive(serde::Deserialize)]
 pub struct ResetBindkeyRequest {
     pub reset_type: String, // perte, corruption, effacement…
-    pub performed_by: Uuid, // admin / utilisateur
+    // ⚠️ performed_by supprimé côté sécurité :
+    // on utilise auth.user_id (sinon spoof possible)
 }
 
 pub async fn reset_bindkey(
+    Extension(auth): Extension<AuthUser>, // Utilisateur authentifié
     State(state): State<AppState>,
     Path(bindkey_id): Path<Uuid>,
     Json(payload): Json<ResetBindkeyRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+
+    // RBAC : seul ENROLLER/ADMIN
+    if !require_role(&auth.role, &UserRole::ENROLLER) {
+        return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
+    }
 
     let reset_id = Uuid::new_v4();
 
@@ -240,7 +265,7 @@ pub async fn reset_bindkey(
     .bind(reset_id)
     .bind(bindkey_id)
     .bind(&payload.reset_type)
-    .bind(payload.performed_by)
+    .bind(auth.user_id) // identifiant réel (depuis token)
     .execute(&state.db)
     .await
     .map_err(|e| (

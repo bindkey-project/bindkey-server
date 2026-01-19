@@ -5,19 +5,27 @@
 // - models   : structures représentant les tables PostgreSQL
 // - handlers : logique métier (fonctions appelées par les routes)
 // - routes   : déclaration et organisation des endpoints HTTP
+// - auth     : logique d’authentification (extractor, rôles)
+// - middleware : middlewares globaux (auth, logs, etc.)
 //
 pub mod models;
 pub mod handlers;
 pub mod routes;
+pub mod auth;
+pub mod middleware;
 
 // Import Axum :
 // - Router : permet de construire le routeur principal
 // - get    : méthode HTTP GET
 // - State  : extraction de l’état global (AppState)
+// - from_fn_with_state : middleware avec accès à l’état global
 use axum::{Router, routing::get, extract::State};
+use axum::middleware::from_fn_with_state;
 
 // État global de l’application (connexion DB, config, etc.)
 use crate::db::AppState;
+
+use crate::api::middleware::auth_middleware::auth_middleware;
 
 // Import des différents groupes de routes
 use crate::api::routes::{
@@ -38,56 +46,52 @@ use crate::api::routes::{
 // Cette fonction assemble toutes les routes de l’application
 // en un seul Router Axum, partagé avec un état global (AppState).
 //
-
 pub fn create_app(state: AppState) -> Router {
-    Router::new()
+    // ─────────────────────────────────────────
+    // Routes publiques (pas d’auth requise)
+    // ─────────────────────────────────────────
+    let public = Router::new()
+        
 
-        // ─────────────────────────────────────────
-        // Routes liées aux utilisateurs
-        // (/users, /users/:id, etc.)
-        // ─────────────────────────────────────────
-        .merge(user_routes())
-
-        // ─────────────────────────────────────────
-        // Routes liées aux BindKeys
-        // (enrôlement, statut, reset)
-        // ─────────────────────────────────────────
-        .merge(bindkey_routes())
-
-        // ─────────────────────────────────────────
-        // Routes liées aux disques physiques
-        // ─────────────────────────────────────────
-        .merge(disk_routes())
-
-        // ─────────────────────────────────────────
-        // Routes liées aux volumes chiffrés
-        // ─────────────────────────────────────────
-        .merge(volume_routes())
-
-        // ─────────────────────────────────────────
-        // Routes de partage et permissions
-        // ─────────────────────────────────────────
-        .merge(permission_routes())
-
-        // ─────────────────────────────────────────
-        // Routes de gestion des sessions (login, refresh, logout)
-        // ─────────────────────────────────────────
+        // Routes de gestion des sessions
+        // (login, refresh, logout)
         .merge(session_routes())
 
-        // ─────────────────────────────────────────
-        // Routes de montage / démontage des volumes
-        // ─────────────────────────────────────────
+        // Endpoint de supervision
+        // GET /health
+        .route("/health", get(health_check));
+
+    // ─────────────────────────────────────────
+    // Routes protégées (Bearer token requis)
+    // ─────────────────────────────────────────
+    let protected = Router::new()
+        // Gestion des BindKeys
+        .merge(bindkey_routes())
+
+        // Gestion des disques physiques
+        .merge(disk_routes())
+
+        // Gestion des volumes chiffrés
+        .merge(volume_routes())
+
+        // Partage et permissions
+        .merge(permission_routes())
+
+        // Montage / démontage des volumes
         .merge(mount_routes())
 
-        // ─────────────────────────────────────────
-        // GET /health
-        // Endpoint de supervision (healthcheck)
-        // ─────────────────────────────────────────
-        .route("/health", get(health_check))
+        // Routes liées aux utilisateurs
+        // (/users, /users/:id, etc.)
+        .merge(user_routes())
+        
+        // Middleware global d’authentification
+        // → valide le Bearer token avant d’atteindre les handlers
+        .layer(from_fn_with_state(state.clone(), auth_middleware));
 
-        // ─────────────────────────────────────────
-        // Partage de l’état global (DB) à tous les handlers
-        // ─────────────────────────────────────────
+    // Assemblage final de l’API
+    Router::new()
+        .merge(public)
+        .merge(protected)
         .with_state(state)
 }
 
@@ -97,9 +101,6 @@ pub fn create_app(state: AppState) -> Router {
 // Objectif : vérifier que l’API est opérationnelle
 // ─────────────────────────────────────────────────────────────
 //
-
-async fn health_check(
-    State(_state): State<AppState>, // L’état est injecté mais non utilisé ici
-) -> &'static str {
+async fn health_check(State(_state): State<AppState>) -> &'static str {
     "OK"
 }
