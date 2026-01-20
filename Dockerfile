@@ -1,5 +1,5 @@
-# --- Stage 1: Build ---
-FROM rustlang/rust:nightly-slim AS builder
+# --- Stage 1: Build (Aligné sur Bookworm) ---
+FROM rustlang/rust:nightly-bookworm AS builder
 
 WORKDIR /app
 
@@ -11,14 +11,13 @@ RUN apt-get update && apt-get install -y \
 
 COPY . .
 
-# --- LE CHANGEMENT EST ICI ---
-# On force SQLx à utiliser les données préparées dans le dossier .sqlx
+# On force SQLx à utiliser les données préparées
 ENV SQLX_OFFLINE=true
 
 # On compile en Release
 RUN cargo build --release
 
-# --- Stage 2: Runtime ---
+# --- Stage 2: Runtime (Identique) ---
 FROM debian:bookworm-slim
 WORKDIR /app
 
@@ -29,7 +28,6 @@ RUN apt-get update && apt-get install -y \
 
 # On récupère le binaire
 COPY --from=builder /app/target/release/bindkey-server .
-# Optionnel : si tu as besoin des migrations pour le démarrage
 COPY --from=builder /app/migrations ./migrations
 
 EXPOSE 8080
