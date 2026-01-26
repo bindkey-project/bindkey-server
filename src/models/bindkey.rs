@@ -32,7 +32,7 @@ pub user_id: Option<Uuid>,
 /// Exemple : UID généré par l'ESP32 ou par un secure element.
 pub bindkey_uid: String,
 
-pub fingerprint_hash: String,
+pub fingerprint_template: String,
 
 /// Clé publique de la BindKey, utilisée pour vérifier une signature
 /// dans le mécanisme challenge/response.

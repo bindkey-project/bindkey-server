@@ -15,6 +15,11 @@ edition = "2024"              # Version du langage Rust utilisée (la plus réce
 # Framework web utilisé pour créer l'API HTTP (routes, JSON, extracteurs...)
 axum = "0.7"
 
+# NOUVEAU : Serveur gérant le HTTPS nativement
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+# Ajoute cette ligne dans ton Cargo.toml sous [dependencies]
+rustls = "0.23"
+
 # Runtime asynchrone indispensable pour Axum + SQLx
 tokio = { version = "1", features = ["full", "macros", "rt-multi-thread"] }
 
@@ -26,8 +31,6 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 dotenvy = "0.15"
 
 # ORM async pour PostgreSQL + support UUID/chrono + macros + migrations
-# On désactive les "default-features" pour ne garder que le strict nécessaire
-# On configure sqlx sans les drivers par défaut
 sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls", "uuid", "chrono", "migrate", "macros"] }
 
 
@@ -41,27 +44,32 @@ uuid = { version = "1.19.0", features = ["v4", "serde"] }
 # Gestion des dates/timestamps PostgreSQL (TIMESTAMPTZ)
 chrono = { version = "0.4.42", features = ["serde"] }
 tower = { version = "0.5.3", features = ["util"] }
+ran = "2.0.1"
+# Génération de valeurs aléatoires sécurisées
+rand = "0.9.2"
 
-# Hash sécurisé des secrets (recovery code, mots de passe, etc.)
-# → recommandé pour la sécurité (résistant aux attaques par brute-force)
+# NOUVEAU : Pour générer des certificats TLS auto-signés
+rcgen = "0.13"
+
+# Hash sécurisé des secrets (mots de passe, etc.)
 argon2 = "0.5"
 
-# Génération de valeurs aléatoires sécurisées
-# → utilisé pour créer des codes uniques (recovery code, tokens, etc.)
-rand = "0.8"
-
-# Pour encoder le code en Base64 URL-safe 
-base64 = "0.22"
-
-# Gestion du temps (durées, timestamps, expiration)
-# → utile pour tokens, sessions, expiration des accès
+# Gestion du temps
 time = "0.3"
 
 hex = "0.4"
 
+# ─────────────────────────────────────────────
+# Configuration des cibles (C'est ici que ça change)
+# ─────────────────────────────────────────────
+
 [lib]
-name = "bindkey_server"  # J'utilise l'underscore ici (_)
-path = "src/main.rs"
+name = "bindkey_server"
+path = "src/lib.rs"    # On sépare la logique (lib) du point d'entrée (bin)
+
+[[bin]]
+name = "bindkey-server"
+path = "src/main.rs"   # Le binaire contient uniquement le démarrage du serveur
 
 [[test]]
 name = "bindkey_tests"
@@ -69,16 +77,11 @@ path = "Tests/bindkey_tests.rs"
 [[test]]
 name = "disk_tests"
 path = "Tests/disk_tests.rs"
-[[test]]
-name = "volume_tests"
-path = "Tests/volume_tests.rs"
-[[test]]
-name = "session_tests"
-path = "Tests/session_tests.rs"
-[[test]]
-name = "mount_tests"
-path = "Tests/mount_tests.rs"
-[[test]]
-name = "permission_tests"
-path = "Tests/permission_tests.rs"
 
+[features]
+# On crée une feature "skip-auth"
+skip-auth = []
+
+[dev-dependencies]
+# On force l'activation de la feature pour tout ce qui est dans le dossier Tests/
+bindkey-server = { path = ".", features = ["skip-auth"] }

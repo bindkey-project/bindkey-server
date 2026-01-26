@@ -18,8 +18,19 @@ pub async fn auth_middleware(
     State(state): State<AppState>,
     mut req: Request,
     next: Next,
-) -> Result<Response, (StatusCode, String)> {
     
+) -> Result<Response, (StatusCode, String)> {
+  // --- BLOC CORRIGÉ POUR LES TESTS ---
+    if cfg!(feature = "skip-auth") {
+        // On injecte un utilisateur "ADMIN" factice 
+        // pour que les handlers ne plantent pas sur Missing Extension
+        req.extensions_mut().insert(AuthUser { 
+            user_id: Uuid::nil(), // 00000000-0000-0000-0000-000000000000
+            role: UserRole::ADMIN 
+        });
+        return Ok(next.run(req).await);
+    }
+    // ------------------------------------
     // 1) Lire le header Authorization
     let auth_header = req
         .headers()

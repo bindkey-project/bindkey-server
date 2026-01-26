@@ -1,66 +1,44 @@
 use std::net::SocketAddr;
-use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 use dotenvy::dotenv;
-use axum::Router;
 
-mod api;
-mod config;
-mod db;
+// On importe tout depuis la lib
+use bindkey_server::create_app_instance; 
+use bindkey_server::config;
 
-use db::AppState;
+use axum_server::tls_rustls::RustlsConfig;
+use rcgen::generate_simple_self_signed;
 
-/// 1. FONCTION DE CRÉATION DE L'APP
-/// On extrait toute la logique de construction ici pour qu'elle soit réutilisable.
-pub async fn create_app_instance() -> Router {
-    // On charge le .env pour récupérer DATABASE_URL
-    dotenv().ok();
-
-    // Configuration (port + DATABASE_URL) via ton module config
-    let cfg = config::Config::from_env();
-
-    // Connexion BDD via ton module db
-    let pool = db::create_pool(&cfg.database_url)
-        .await
-        .expect("Failed to connect to PostgreSQL");
-
-    // Exécution des migrations pour garantir que les tables (users, bindkeys) existent
-    sqlx::migrate!().run(&pool).await.expect("Migration failed");
-
-    // Création du state global pour les handlers
-    let state = AppState { db: pool };
-
-    // On retourne le router final créé par ton module api
-    api::create_app(state)
-}
-
-/// 2. POINT D'ENTRÉE DU SERVEUR
 #[tokio::main]
 async fn main() {
-    // Initialisation des logs (uniquement ici pour ne pas polluer les tests)
+    // Initialisation du provider TLS (important !)
+    rustls::crypto::aws_lc_rs::default_provider().install_default().ok();
+
     dotenv().ok();
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    tracing::info!("Starting BindKey server logic...");
+    tracing::info!("Starting BindKey server logic with TLS...");
 
-    // On appelle notre fonction pour obtenir le router
+    // On utilise la fonction qui est maintenant dans la lib
     let app = create_app_instance().await;
 
-    // Configuration de l'adresse (Logique d'origine conservée)
     let cfg = config::Config::from_env();
     let addr = SocketAddr::from(([0, 0, 0, 0], cfg.port));
-    
-    let listener = TcpListener::bind(addr)
-        .await
-        .expect("failed to bind TCP listener");
 
-    let actual_addr = listener.local_addr().expect("failed to read local addr");
-    tracing::info!("BindKey server running on http://{}/", actual_addr);
+    // Configuration TLS
+    let subject_alt_names = vec!["localhost".to_string(), "127.0.0.1".to_string()];
+    let cert = generate_simple_self_signed(subject_alt_names).unwrap();
+    let config = RustlsConfig::from_der(
+        vec![cert.cert.der().to_vec()], 
+        cert.key_pair.serialize_der()
+    ).await.unwrap();
 
-    // Lancement du serveur Axum
-    axum::serve(listener, app)
+    tracing::info!("🛡️ BindKey server running on https://localhost:{}/", cfg.port);
+
+    axum_server::bind_rustls(addr, config)
+        .serve(app.into_make_service())
         .await
-        .expect("server failed");
+        .unwrap();
 }
