@@ -10,7 +10,7 @@ metadata:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     # Désactive HTTP/2 pour éviter les bugs avec le port-forward
     nginx.ingress.kubernetes.io/use-http2: "false"
-    # INDISPENSABLE : Dit à Nginx que ton serveur Rust écoute en HTTPS
+    # INDISPENSABLE : Dit à Nginx que le serveur Rust écoute en HTTPS
     nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
     # INDISPENSABLE : Ignore le fait que le certificat interne de Rust soit auto-signé
     nginx.ingress.kubernetes.io/proxy-ssl-verify: "off"
@@ -18,7 +18,7 @@ spec:
   tls:
   - hosts:
     - api.bindkey.local
-    # Le secret qu'on a créé avec openssl (tls.crt / tls.key)
+    # Le secret créé avec openssl (tls.crt / tls.key)
     secretName: bindkey-tls-secret
   rules:
   - host: api.bindkey.local
