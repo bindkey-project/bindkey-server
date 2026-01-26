@@ -7,7 +7,7 @@
 // - Extension : récupérer AuthUser injecté par le middleware (RBAC)
 
 // rand : permet de générer du hasard "cryptographiquement sûr"
-use rand::{rngs::OsRng, RngCore};
+use argon2::password_hash::rand_core::{OsRng, RngCore};
 
 // base64 : pour transformer des bytes random en string copiable (URL-safe)
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};

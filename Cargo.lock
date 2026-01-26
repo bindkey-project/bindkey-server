@@ -197,6 +197,7 @@ dependencies = [
  "argon2",
  "axum",
  "axum-server",
+ "base64",
  "bindkey-server",
  "chrono",
  "dotenvy",

@@ -11,6 +11,7 @@ edition = "2024"              # Version du langage Rust utilisée (la plus réce
 # Dépendances Rust utilisées par le projet
 # ─────────────────────────────────────────────
 [dependencies]
+base64 = "0.22"
 
 # Framework web utilisé pour créer l'API HTTP (routes, JSON, extracteurs...)
 axum = "0.7"
@@ -85,3 +86,5 @@ skip-auth = []
 [dev-dependencies]
 # On force l'activation de la feature pour tout ce qui est dans le dossier Tests/
 bindkey-server = { path = ".", features = ["skip-auth"] }
+
+
