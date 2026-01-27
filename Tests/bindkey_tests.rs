@@ -1,3 +1,4 @@
+use axum::body as ax_body;
 use axum::{
     body::Body,
     http::{Request, StatusCode},
@@ -6,23 +7,23 @@ use serde_json::{Value, json};
 use tower::util::ServiceExt;
 use uuid::Uuid;
 
-// On importe body proprement pour les conversions
-use axum::body as ax_body;
-
 use bindkey_server::create_app_instance;
 
+// ─────────────────────────────────────────────────────────────
+// Test 1 : flow enrollement + doublon
+// ─────────────────────────────────────────────────────────────
 #[tokio::test]
 async fn test_full_security_and_enrollment_flow() {
     let app = create_app_instance().await;
 
-    // --- ÉTAPE 1 : CRÉATION DE L'UTILISATEUR ---
+    // ÉTAPE 1 : CRÉATION DE L'UTILISATEUR
+    // NOTE : le handler create_user attend "password" (clair) optionnel
     let user_email = format!("dev_{}@bindkey.io", Uuid::new_v4());
     let create_user_json = json!({
         "first_name": "Marwa",
         "last_name": "Dev",
         "email": user_email,
-        "role": "USER",
-        "password_hash": "hash123"
+        "password": "password123"
     });
 
     let user_res = app
@@ -54,11 +55,12 @@ async fn test_full_security_and_enrollment_flow() {
 
     println!("\n--- ÉTAPE 1 : USER CRÉÉ ({}) ---", user_id);
 
-    // --- ÉTAPE 2 : PREMIER ENRÔLEMENT ---
+    // ÉTAPE 2 : ENRÔLEMENT DE LA BINDKEY
     let shared_bindkey_uid = format!("BK-STORY1-{}", Uuid::new_v4());
     let enroll_payload = json!({
         "user_id": user_id,
         "bindkey_uid": shared_bindkey_uid,
+        // ⚠️ à adapter si votre endpoint attend une vraie clé base64
         "public_key": "pub_key_secure_2026",
         "fingerprint_template": "biometric_template_hash"
     });
@@ -76,7 +78,6 @@ async fn test_full_security_and_enrollment_flow() {
         .await
         .unwrap();
 
-    // --- AJOUT DE LOGS POUR VOIR L'ERREUR REELLE ---
     let status = enroll_res.status();
     let body_bytes = ax_body::to_bytes(enroll_res.into_body(), usize::MAX)
         .await
@@ -92,7 +93,7 @@ async fn test_full_security_and_enrollment_flow() {
         body_str
     );
 
-    // --- ÉTAPE 3 : TEST DE SÉCURITÉ (DOUBLON) ---
+    // ÉTAPE 3 : TEST DOUBLON (doit être bloqué)
     let duplicate_res = app
         .oneshot(
             Request::builder()
@@ -107,11 +108,13 @@ async fn test_full_security_and_enrollment_flow() {
 
     let dup_status = duplicate_res.status();
     println!("\n--- ÉTAPE 3 : TEST SÉCURITÉ (DOUBLON) ---");
-
     assert_eq!(dup_status, StatusCode::CONFLICT);
-    println!("Résultat : La sécurité a bien bloqué le doublon avec un code 409.");
+    println!("✅ Doublon bloqué avec 409 CONFLICT");
 }
 
+// ─────────────────────────────────────────────────────────────
+// Test 2 : GET /users/:id/bindkeys (liste)
+// ─────────────────────────────────────────────────────────────
 #[tokio::test]
 async fn test_get_user_bindkeys_list() {
     let app = create_app_instance().await;
@@ -121,8 +124,7 @@ async fn test_get_user_bindkeys_list() {
         "first_name": "Test",
         "last_name": "List",
         "email": user_email,
-        "role": "USER",
-        "password_hash": "hash123"
+        "password": "password123"
     });
 
     let user_res = app
@@ -159,6 +161,9 @@ async fn test_get_user_bindkeys_list() {
     assert!(response.status().is_success());
 }
 
+// ─────────────────────────────────────────────────────────────
+// Test 3 : GET /bindkeys/:id (not found)
+// ─────────────────────────────────────────────────────────────
 #[tokio::test]
 async fn test_get_bindkey_not_found() {
     let app = create_app_instance().await;
@@ -179,6 +184,9 @@ async fn test_get_bindkey_not_found() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
+// ─────────────────────────────────────────────────────────────
+// Test 4 : contenu liste bindkeys non vide
+// ─────────────────────────────────────────────────────────────
 #[tokio::test]
 async fn test_get_user_bindkeys_list_content() {
     let app = create_app_instance().await;
@@ -196,8 +204,7 @@ async fn test_get_user_bindkeys_list_content() {
                         "first_name": "List",
                         "last_name": "Tester",
                         "email": user_email,
-                        "role": "USER",
-                        "password_hash": "hash123"
+                        "password": "password123"
                     }))
                     .unwrap(),
                 ))

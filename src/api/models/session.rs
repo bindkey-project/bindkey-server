@@ -17,14 +17,13 @@ pub struct Session {
     // Bindkey utilisée pour l’authentification
     pub bindkey_id: Uuid,
 
-    // Token généré côté serveur (pour l’API)
-    pub server_token: String,
-
-    // Token généré côté client (clé locale)
-    pub local_token: String,
+    pub server_token: Option<String>,
+    pub local_token: Option<String>,
 
     // Expiration de la session
     pub expires_at: DateTime<Utc>,
 
     pub created_at: DateTime<Utc>,
+    // Le challenge envoyé à la BindKey
+    pub auth_challenge: Option<String>,
 }

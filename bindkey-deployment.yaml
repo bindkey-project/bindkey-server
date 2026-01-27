@@ -39,6 +39,12 @@ spec:
                 secretKeyRef:
                   name: bindkey-db-secrets
                   key: dburl
+            # AJOUT : Clé symétrique pour le chiffrement des mots de passe
+            - name: PWD_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: bindkey-pwd-keys
+                  key: PWD_ENCRYPTION_KEY
 
         # --- COMPOSANT : BASE DE DONNÉES ---
         - name: bindkey-db

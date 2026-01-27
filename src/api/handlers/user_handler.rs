@@ -1,20 +1,3 @@
-// src/api/handlers/user_handler.rs
-//
-// Endpoints couverts (selon ton fichier actuel) :
-//   - POST   /users
-//   - GET    /users/:id
-//   - GET    /users?email=...
-//   - PATCH  /users/:id/status
-//
-// Sécurité :
-//   - ENROLLER/ADMIN requis pour create + search + status update
-//   - USER peut lire son profil
-//
-// Audit :
-//   - USER_CREATE
-//   - USER_PASSWORD_SET (si password fourni au create)
-//   - USER_ENABLE / USER_DISABLE
-
 use axum::{
     Extension, Json,
     extract::{Path, Query, State},
@@ -27,17 +10,18 @@ use crate::api::auth::{AuthUser, require_role};
 use crate::api::models::user::{User, UserRole, UserStatus};
 use crate::db::AppState;
 
-// Recovery code (random + base64 url safe)
+// Crypto
 use argon2::password_hash::rand_core::{OsRng, RngCore};
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-
-// Argon2 hashing (pour recovery_code et password)
 use argon2::{
     Argon2,
     password_hash::{PasswordHasher, SaltString},
 };
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 
-// ✅ Audit helper
+// Middleware crypto
+use crate::api::middleware;
+
+// Audit
 use crate::api::audit::{AuditSeverity, write_audit_log};
 
 //
@@ -50,17 +34,14 @@ pub struct CreateUserRequest {
     pub first_name: String,
     pub last_name: String,
     pub email: String,
-
-    // si tu veux garder password_hash : on accepte un password EN CLAIR,
-    // et on stocke SON HASH (argon2) en DB (jamais le password en clair)
-    pub password: Option<String>,
+    pub password: Option<String>, // password EN CLAIR
 }
 
 #[derive(serde::Serialize)]
 pub struct CreateUserResponse {
     pub id: Uuid,
     pub message: String,
-    pub recovery_code: String, // affiché une seule fois
+    pub recovery_code: String, // affiché UNE seule fois
 }
 
 pub async fn create_user(
@@ -68,74 +49,65 @@ pub async fn create_user(
     State(state): State<AppState>,
     Json(payload): Json<CreateUserRequest>,
 ) -> Result<Json<CreateUserResponse>, (StatusCode, String)> {
-    // RBAC : ENROLLER/ADMIN
+    // RBAC
     if !require_role(&auth.role, &UserRole::ENROLLER) {
         return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
     }
 
     let user_id = Uuid::new_v4();
 
-    // 1) Générer recovery_code
+    // ── Recovery code (random + hash)
     let mut raw = [0u8; 16];
     OsRng.fill_bytes(&mut raw);
     let recovery_code = URL_SAFE_NO_PAD.encode(raw);
 
-    // 2) Hash recovery_code (argon2)
-    let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
+    let salt = SaltString::generate(&mut OsRng);
+
     let recovery_code_hash = argon2
         .hash_password(recovery_code.as_bytes(), &salt)
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Hash error: {e}"),
-            )
-        })?
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .to_string();
 
-    // 3) Si password fourni => hash password (argon2) et stocker password_hash
-    let password_hash: Option<String> = if let Some(pwd) = &payload.password {
-        let salt = SaltString::generate(&mut OsRng);
-        Some(
-            argon2
-                .hash_password(pwd.as_bytes(), &salt)
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Password hash error: {e}"),
-                    )
-                })?
-                .to_string(),
-        )
+    // ── Password (optionnel)
+    let password_hash_encrypted: Option<String> = if let Some(password) = &payload.password {
+        let argon2_hash = middleware::hachage_argon2::hasher_mot_de_passe(password);
+        Some(middleware::aes_chiffrement::chiffrer_aes(&argon2_hash))
     } else {
         None
     };
 
-    // 4) INSERT user
-    // Note: role fixé côté serveur (anti-spoof) + status ACTIVE
-    let query = r#"
+    // ── INSERT user
+    sqlx::query(
+        r#"
         INSERT INTO users (
-            id, first_name, last_name, email, job_title, role, status,
-            recovery_code_hash, password_hash
+            id, first_name, last_name, email,
+            role, status,
+            password_hash, recovery_code_hash,
+            created_at, updated_at
         )
-        VALUES ($1, $2, $3, $4, NULL, 'USER', 'ACTIVE', $5, $6)
-    "#;
+        VALUES (
+            $1, $2, $3, $4,
+            'USER', 'ACTIVE',
+            $5, $6,
+            now(), now()
+        )
+        "#,
+    )
+    .bind(user_id)
+    .bind(&payload.first_name)
+    .bind(&payload.last_name)
+    .bind(&payload.email)
+    .bind(password_hash_encrypted)
+    .bind(recovery_code_hash)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
 
-    sqlx::query(query)
-        .bind(user_id)
-        .bind(&payload.first_name)
-        .bind(&payload.last_name)
-        .bind(&payload.email)
-        .bind(recovery_code_hash)
-        .bind(password_hash.clone())
-        .execute(&state.db)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
-
-    // ✅ Audit : USER_CREATE (après INSERT OK)
+    // ── Audit
     let _ = write_audit_log(
         &state,
-        Some(auth.user_id), // acteur
+        Some(auth.user_id),
         None,
         "USER_CREATE",
         Some(format!("created_user_id={user_id} email={}", payload.email)),
@@ -143,17 +115,13 @@ pub async fn create_user(
     )
     .await;
 
-    // ✅ Audit : USER_PASSWORD_SET (si password fourni)
-    if password_hash.is_some() {
+    if payload.password.is_some() {
         let _ = write_audit_log(
             &state,
             Some(auth.user_id),
             None,
             "USER_PASSWORD_SET",
-            Some(format!(
-                "password set at create for user_id={user_id} email={}",
-                payload.email
-            )),
+            Some(format!("user_id={user_id}")),
             AuditSeverity::INFO,
         )
         .await;
@@ -247,17 +215,16 @@ pub async fn update_user_status(
         WHERE id = $2
         "#,
     )
-    .bind(payload.status) // UserStatus doit être sqlx-compatible (déjà chez toi)
+    .bind(payload.status)
     .bind(user_id)
     .execute(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     if res.rows_affected() == 0 {
         return Err((StatusCode::NOT_FOUND, "User not found".into()));
     }
 
-    // ✅ Audit : USER_ENABLE / USER_DISABLE (après UPDATE OK)
     let action = match payload.status {
         UserStatus::ACTIVE => "USER_ENABLE",
         UserStatus::DISABLED => "USER_DISABLE",
@@ -268,10 +235,7 @@ pub async fn update_user_status(
         Some(auth.user_id),
         None,
         action,
-        Some(format!(
-            "target_user_id={user_id} status={:?}",
-            payload.status
-        )),
+        Some(format!("target_user_id={user_id}")),
         AuditSeverity::WARNING,
     )
     .await;

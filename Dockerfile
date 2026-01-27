@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y \
 
 COPY . .
 
+# 1. Copie le dossier .sqlx dans l'image de build
+COPY .sqlx .sqlx
 # On force SQLx à utiliser les données préparées
 ENV SQLX_OFFLINE=true
 
