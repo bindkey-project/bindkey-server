@@ -8,8 +8,10 @@ use uuid::Uuid;
 
 // On importe body proprement pour les conversions
 use axum::body as ax_body;
+use std::env;
 
 use bindkey_server::create_app_instance;
+
 
 #[tokio::test]
 async fn test_full_security_and_enrollment_flow() {
