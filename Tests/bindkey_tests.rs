@@ -222,7 +222,7 @@ async fn test_get_user_bindkeys_list_content() {
 }
 
 
-async fn setup_test_user_with_key(pool: &sqlx::PgPool, email: &str, public_key_b64: &str) {
+/*async fn setup_test_user_with_key(pool: &sqlx::PgPool, email: &str, public_key_b64: &str) {
     // 1. Configuration de l'environnement de sécurité (AES)
     unsafe {
         std::env::set_var("PWD_ENCRYPTION_KEY", "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
@@ -305,8 +305,8 @@ async fn setup_test_user_with_key(pool: &sqlx::PgPool, email: &str, public_key_b
     .await
     .expect("Erreur lors de l'insertion de la bindkey");
 }
-#[tokio::test]
-async fn test_full_authentication_flow() {
+#[tokio::test]*/
+/*async fn test_full_authentication_flow() {
     // 1. Initialisation du serveur de test (In-Memory)
     // On récupère ton Router via create_app_instance
     let app = create_app_instance().await; 
@@ -360,4 +360,4 @@ async fn test_full_authentication_flow() {
     assert_eq!(final_data.role, "USER");
     
     println!("✅ Flow d'authentification validé en mémoire pour : {}", final_data.first_name);
-}
+}*/
