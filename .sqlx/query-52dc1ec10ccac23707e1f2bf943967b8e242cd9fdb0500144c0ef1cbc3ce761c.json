@@ -1,17 +1,17 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT \n            s.id, s.user_id, u.first_name, u.role as \"role: String\"\n        FROM sessions s\n        INNER JOIN users u ON s.user_id = u.id\n        WHERE s.server_token = $1\n        ",
+  "query": "\n        SELECT\n            u.id as user_id,\n            u.password_hash,\n            u.first_name,\n            u.role as \"role: String\",\n            b.id as bindkey_id\n        FROM users u\n        INNER JOIN bindkeys b ON u.id = b.user_id\n        WHERE u.email = $1\n        ",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "id",
+        "name": "user_id",
         "type_info": "Uuid"
       },
       {
         "ordinal": 1,
-        "name": "user_id",
-        "type_info": "Uuid"
+        "name": "password_hash",
+        "type_info": "Text"
       },
       {
         "ordinal": 2,
@@ -33,6 +33,11 @@
             }
           }
         }
+      },
+      {
+        "ordinal": 4,
+        "name": "bindkey_id",
+        "type_info": "Uuid"
       }
     ],
     "parameters": {
@@ -42,10 +47,11 @@
     },
     "nullable": [
       false,
+      true,
       false,
       false,
       false
     ]
   },
-  "hash": "46dcced8134de853ddadd326bfa07ffe11d8695963fdc4e719c64cfb6c7fc85d"
+  "hash": "52dc1ec10ccac23707e1f2bf943967b8e242cd9fdb0500144c0ef1cbc3ce761c"
 }
