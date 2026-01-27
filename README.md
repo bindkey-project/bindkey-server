@@ -14,7 +14,7 @@ Dans le dossier du projet :
 docker compose up -d
 
 route sessions/login envoyer juste caractere aléatoire pour la cle  verifiaction , garder le string genere en memoire pour la verification GOOD 
-route sessions/verify : objectif verifier que c'est la bonne bindkey , verifier signature clé bindkey avec la clé public stocké bdd , si ok (le string aléatoire envoyer==dechifrement avec la clé public du bindkey ) envoyer token de session definitive pour faire les routes , nom user + roles , pour etre sur que c'est bien la meme personne avec le string on recoit le email de la personne 
+route sessions/verify : objectif verifier que c'est la bonne bindkey , verifier signature clé bindkey avec la clé public stocké bdd , si ok (le string aléatoire envoyer==dechifrement avec la clé public du bindkey ) envoyer token de session definitive pour faire les routes , nom user + roles , pour etre sur que c'est bien la meme personne avec le string on recoit le email de la personne GOOD 
 
 
 

@@ -1,10 +1,10 @@
 use aes_gcm::{
-    aead::{Aead, KeyInit},
+    aead::{Aead, KeyInit, AeadCore, OsRng}, // On importe OsRng ICI
     Aes256Gcm, Nonce, Key
 };
+// Supprime l'import "use rand::rngs::OsRng;" s'il y est encore
 use std::env;
 use base64::{engine::general_purpose, Engine as _};
-
 /// Chiffre une chaîne (le hash Argon2) en AES-256-GCM
 pub fn chiffrer_aes(donnees: &str) -> String {
     let key_hex = env::var("PWD_ENCRYPTION_KEY").expect("PWD_ENCRYPTION_KEY manquante");
@@ -12,16 +12,18 @@ pub fn chiffrer_aes(donnees: &str) -> String {
     let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
     let cipher = Aes256Gcm::new(key);
 
-    // IV (Nonce) : Doit être unique. Pour simplifier ici, on utilise un fixe de 12 octets.
-    // NOTE : En production, on génère un nonce aléatoire et on le préfixe au message.
-    let nonce = Nonce::from_slice(b"unique_nonce"); 
+    // Maintenant OsRng est compatible !
+    let nonce = Aes256Gcm::generate_nonce(&mut OsRng); 
 
-    let ciphertext = cipher
-        .encrypt(nonce, donnees.as_bytes())
+    let mut ciphertext = cipher
+        .encrypt(&nonce, donnees.as_bytes())
         .expect("Échec du chiffrement AES");
 
-    // Retourne le résultat en Base64 pour stockage en BDD TEXT
-    general_purpose::STANDARD.encode(ciphertext)
+    // Concaténation Nonce + Ciphertext
+    let mut final_blob = nonce.to_vec();
+    final_blob.append(&mut ciphertext);
+
+    general_purpose::STANDARD.encode(final_blob)
 }
 
 /// Déchiffre une chaîne Base64 pour retrouver le hash Argon2 original
@@ -31,15 +33,18 @@ pub fn dechiffrer_aes(blob_base64: &str) -> String {
     let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
     let cipher = Aes256Gcm::new(key);
 
-    let ciphertext = general_purpose::STANDARD
+    let full_data = general_purpose::STANDARD
         .decode(blob_base64)
         .expect("Échec du décodage Base64");
 
-    let nonce = Nonce::from_slice(b"unique_nonce"); 
+    // On sépare le nonce (12 premiers octets) du reste (le message)
+    if full_data.len() < 12 { panic!("Données corrompues : trop courtes"); }
+    let (nonce_slice, ciphertext) = full_data.split_at(12);
+    let nonce = Nonce::from_slice(nonce_slice);
 
     let plaintext_bytes = cipher
-        .decrypt(nonce, ciphertext.as_ref())
+        .decrypt(nonce, ciphertext)
         .expect("Échec du déchiffrement : clé incorrecte ou donnée altérée");
 
-    String::from_utf8(plaintext_bytes).expect("Données déchiffrées corrompues (UTF-8)")
+    String::from_utf8(plaintext_bytes).expect("UTF-8 invalide")
 }

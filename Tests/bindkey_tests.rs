@@ -8,13 +8,13 @@ use uuid::Uuid;
 
 // On importe body proprement pour les conversions
 use axum::body as ax_body;
-use std::env;
+//use std::env;
 use sqlx::Row; 
 
 use bindkey_server::create_app_instance;
 use ed25519_dalek::{SigningKey, VerifyingKey, Signer};
 use base64::{engine::general_purpose, Engine as _};
-use rand::rngs::OsRng;
+//use rand::rngs::OsRng;
 use bindkey_server::api::handlers::session_handler::{LoginResponse, VerifyRequest, VerifyResponse};
 use axum_test::TestServer;
 use aes_gcm::{Aes256Gcm, KeyInit, Key, Nonce};
