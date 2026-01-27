@@ -10,7 +10,8 @@ use axum::{
 use crate::api::handlers::session_handler::{
     login_session,    // POST /sessions/login
     refresh_session,  // POST /sessions/refresh
-    logout_session,   // POST /sessions/logout
+    logout_session,
+    verify_session,   // POST /sessions/logout
 };
 
 //
@@ -47,4 +48,9 @@ pub fn session_routes() -> Router<crate::db::AppState> {
         // → révocation immédiate de l’accès
         // ─────────────────────────────────────────
         .route("/sessions/logout", post(logout_session))
+
+        // Vérifie la signature cryptographique ECC
+        .route("/sessions/verify", post(verify_session))
+
+
 }
