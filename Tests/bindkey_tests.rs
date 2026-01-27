@@ -23,6 +23,8 @@ use argon2::{
     password_hash::{PasswordHasher, SaltString},
     Argon2,
 };
+use bindkey_server::api::middleware::hasher_mot_de_passe;
+use bindkey_server::api::middleware::chiffrer_aes;
 
 #[tokio::test]
 async fn test_full_security_and_enrollment_flow() {
@@ -361,3 +363,19 @@ async fn test_get_user_bindkeys_list_content() {
     
     println!("✅ Flow d'authentification validé en mémoire pour : {}", final_data.first_name);
 }*/
+
+#[tokio::test]
+async fn generate_real_admin_hash() {
+    // 1. On utilise DIRECTEMENT la valeur que ton logiciel envoie
+    // On ne recalcule pas le SHA-256 ici pour éviter les erreurs de concaténation
+    let software_hash = "ac78c60dfa03149112f62d063d4cd20c5b3b4d4f6c8f977efc6628d54c0cb65c";
+
+    // 2. Ton hachage Argon2 (Utilise ta fonction avec sel aléatoire)
+    let argon_hash = hasher_mot_de_passe(software_hash);
+
+    // 3. Ton chiffrement AES (Utilise ta fonction avec Nonce aléatoire + préfixe)
+    // Assure-toi que export PWD_ENCRYPTION_KEY=... est fait dans le terminal
+    let final_db_string = chiffrer_aes(&argon_hash);
+
+    println!("\n\n🚀 VALEUR À COPIER EN BDD (password_hash) :\n{}\n", final_db_string);
+}

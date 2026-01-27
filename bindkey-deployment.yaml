@@ -30,7 +30,8 @@ spec:
       containers:
         # --- COMPOSANT : API SERVEUR ---
         - name: bindkey-api
-          image: ghcr.io/bindkey-project/bindkey-server/bindkey-server:latest
+          image: ghcr.io/bindkey-project/bindkey-server/bindkey-server:v1
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
           env:
@@ -39,7 +40,6 @@ spec:
                 secretKeyRef:
                   name: bindkey-db-secrets
                   key: dburl
-            # AJOUT : Clé symétrique pour le chiffrement des mots de passe
             - name: PWD_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
@@ -49,6 +49,8 @@ spec:
         # --- COMPOSANT : BASE DE DONNÉES ---
         - name: bindkey-db
           image: ghcr.io/bindkey-project/bindkey-server/bindkey-db:latest
+          # FORCE LE PROCESSUS POSTGRES À RESTER ACTIF
+          args: ["postgres"]
           ports:
             - containerPort: 5432
           env:
@@ -67,6 +69,9 @@ spec:
                 secretKeyRef:
                   name: bindkey-db-secrets
                   key: dbname
+            # DÉFINIT LE SOUS-DOSSIER POUR LA PERSISTANCE RÉELLE
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
           volumeMounts:
             - name: bindkey-db-storage
               mountPath: /var/lib/postgresql/data

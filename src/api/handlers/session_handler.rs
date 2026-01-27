@@ -112,7 +112,6 @@ pub async fn verify_session(
 ) -> Result<Json<VerifyResponse>, (StatusCode, String)> {
     
     // 1. Récupération de la session + Clé Publique + Infos User
-    // On vérifie aussi que la session n'est pas expirée
     let data = sqlx::query!(
         r#"
         SELECT 
@@ -136,48 +135,51 @@ pub async fn verify_session(
 
     // 2. VÉRIFICATION DE LA SIGNATURE ECC
 
-// a. Décoder la clé publique stockée en BDD
-let pub_key_bytes_vec = general_purpose::STANDARD.decode(&data.public_key)
-    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Clé publique invalide (Base64 corrompu)".into()))?;
+    // a. Décoder la clé publique stockée en BDD
+    let pub_key_bytes_vec = general_purpose::STANDARD.decode(&data.public_key)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Clé publique invalide (Base64 corrompu)".into()))?;
 
-// Conversion Vec<u8> -> [u8; 32] (Ed25519 utilise des clés de 32 octets)
-let pub_key_array: [u8; 32] = pub_key_bytes_vec.try_into()
-    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "La clé publique en BDD n'a pas la bonne taille (32 octets attendus)".into()))?;
+    let pub_key_array: [u8; 32] = pub_key_bytes_vec.try_into()
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "La clé publique en BDD n'a pas la bonne taille (32 octets attendus)".into()))?;
 
-let public_key = VerifyingKey::from_bytes(&pub_key_array)
-    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Format de clé publique Ed25519 invalide".into()))?;
+    let public_key = VerifyingKey::from_bytes(&pub_key_array)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Format de clé publique Ed25519 invalide".into()))?;
 
+    // b. Décoder la signature reçue
+    let sig_bytes_vec = general_purpose::STANDARD.decode(&payload.signature)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Signature Base64 invalide".into()))?;
 
-// b. Décoder la signature reçue
-let sig_bytes_vec = general_purpose::STANDARD.decode(&payload.signature)
-    .map_err(|_| (StatusCode::BAD_REQUEST, "Signature Base64 invalide".into()))?;
+    let sig_array: [u8; 64] = sig_bytes_vec.try_into()
+        .map_err(|_| (StatusCode::BAD_REQUEST, "La signature reçue n'a pas la bonne taille (64 octets attendus)".into()))?;
 
-// Conversion Vec<u8> -> [u8; 64] (Ed25519 utilise des signatures de 64 octets)
-let sig_array: [u8; 64] = sig_bytes_vec.try_into()
-    .map_err(|_| (StatusCode::BAD_REQUEST, "La signature reçue n'a pas la bonne taille (64 octets attendus)".into()))?;
+    let signature = Signature::from_bytes(&sig_array);
 
-let signature = Signature::from_bytes(&sig_array);
+    // --- AJOUT DES LOGS DE DEBUG ---
+    println!("DEBUG: Challenge string: '{}'", challenge);
+    println!("DEBUG: Challenge bytes: {:?}", challenge.as_bytes());
+    println!("DEBUG: Signature bytes: {:?}", sig_array);
+    // -------------------------------
 
+    // c. Vérifier si la signature correspond au challenge original
+    public_key.verify(challenge.as_bytes(), &signature)
+        .map_err(|_| (StatusCode::UNAUTHORIZED, "Échec de la vérification : signature invalide pour ce challenge".into()))?;
 
-// c. Vérifier si la signature correspond au challenge original
-fn generate_secure_token() -> String {
-    use rand::{Rng, rng};
-    use rand::distr::Alphanumeric;
-
-    rng()
-        .sample_iter(&Alphanumeric)
-        .take(64)
-        .map(char::from)
-        .collect()
-}
-public_key.verify(challenge.as_bytes(), &signature)
-    .map_err(|_| (StatusCode::UNAUTHORIZED, "Échec de la vérification : signature invalide pour ce challenge".into()))?;
     // 3. GÉNÉRATION DES TOKENS FINAUX
+    fn generate_secure_token() -> String {
+        use rand::{Rng, rng};
+        use rand::distr::Alphanumeric;
+
+        rng()
+            .sample_iter(&Alphanumeric)
+            .take(64)
+            .map(char::from)
+            .collect()
+    }
+
     let server_token = generate_secure_token(); 
     let local_token = generate_secure_token();
 
     // 4. VALIDATION DE LA SESSION EN BDD
-    // On enregistre les tokens et on SUPPRIME le challenge (usage unique !)
     sqlx::query!(
         "UPDATE sessions SET server_token = $1, local_token = $2, auth_challenge = NULL WHERE id = $3",
         server_token,
