@@ -48,8 +48,12 @@ ran = "2.0.1"
 # Génération de valeurs aléatoires sécurisées
 rand = "0.9.2"
 
-# NOUVEAU : Pour générer des certificats TLS auto-signés
+# Pour générer des certificats TLS auto-signés
 rcgen = "0.13"
+# Chiffrement AES-256-GCM (Chiffrement des hashs)
+aes-gcm = "0.10.3"
+# Pour l'encodage des données chiffrées en texte stockable
+base64 = "0.22"
 
 # Hash sécurisé des secrets (mots de passe, etc.)
 argon2 = "0.5"
@@ -59,9 +63,7 @@ time = "0.3"
 
 hex = "0.4"
 
-# ─────────────────────────────────────────────
-# Configuration des cibles (C'est ici que ça change)
-# ─────────────────────────────────────────────
+
 
 [lib]
 name = "bindkey_server"

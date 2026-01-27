@@ -40,28 +40,32 @@ pub struct CreateUserResponse {
     pub message: String,
 }
 
+use crate::api::middleware;  // On importe tes nouveaux outils
+
 pub async fn create_user(
-    // On remplace Extension par Option<Extension>
     auth_opt: Option<Extension<AuthUser>>, 
     State(state): State<AppState>,
     Json(payload): Json<CreateUserRequest>,
 ) -> Result<Json<CreateUserResponse>, String> {
 
-    // On commente la vérification de rôle pour le moment
-    
+    // 1. (Optionnel) Vérification du rôle ENROLLER si on n'est pas en mode skip-auth
     if let Some(Extension(auth)) = auth_opt {
         if !require_role(&auth.role, &UserRole::ENROLLER) {
             return Err("ENROLLER/ADMIN required".into());
         }
     }
-    
 
-  
+    // 2. LOGIQUE DE SÉCURITÉ : La double protection
+    // On prend le mot de passe reçu, on le hache avec Argon2, puis on le chiffre avec AES
+    let argon2_hash = middleware::hachage_argon2::hasher_mot_de_passe(&payload.password_hash);
+    let final_encrypted_blob = middleware::aes_chiffrement::chiffrer_aes(&argon2_hash);
 
     let user_id = Uuid::new_v4();
-    let recovery_code_hash = "TODO_HASH".to_string();
+    // On applique la même logique pour le code de récupération si besoin
+    let recovery_code_hash = "TODO_SECURE_HASH".to_string();
 
-   let query = r#"
+    // 3. Insertion en Base de Données
+    let query = r#"
         INSERT INTO users (
             id, 
             first_name, 
@@ -76,13 +80,13 @@ pub async fn create_user(
     "#;
 
     sqlx::query(query)
-        .bind(user_id)               // $1
-        .bind(&payload.first_name)    // $2
-        .bind(&payload.last_name)     // $3
-        .bind(&payload.email)         // $4
-        .bind(&payload.role)          // $5
-        .bind(&payload.password_hash) // $6 
-        .bind(recovery_code_hash)     // $7
+        .bind(user_id)               
+        .bind(&payload.first_name)    
+        .bind(&payload.last_name)     
+        .bind(&payload.email)         
+        .bind(&payload.role)          
+        .bind(&final_encrypted_blob) // <--- ON ENREGISTRE LE BLOC AES ICI
+        .bind(recovery_code_hash)     
         .execute(&state.db)
         .await
         .map_err(|e| format!("Erreur SQL: {}", e))?;
@@ -92,7 +96,6 @@ pub async fn create_user(
         message: "Utilisateur créé avec succès".into(),
     }))
 }
-
 //
 // ─────────────────────────────────────────────────────────────
 // GET /users/:id
