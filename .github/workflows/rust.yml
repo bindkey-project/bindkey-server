@@ -47,6 +47,9 @@ jobs:
     - name: Analyse statique (Clippy)
       run: cargo clippy
     - name: Run Tests
+      env:
+        
+        PWD_ENCRYPTION_KEY: ${{ secrets.PWD_ENCRYPTION_KEY }}
       run: cargo test --verbose
 
   # --- JOB 2 : BUILD ET PUSH DES IMAGES (GHCR) ---
