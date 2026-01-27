@@ -10,24 +10,24 @@
 // Audit : LOGIN / LOGIN_FAILED / REFRESH / LOGOUT
 // ─────────────────────────────────────────────────────────────
 
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{Json, extract::State, http::StatusCode};
 use chrono::{Duration, Utc};
 use uuid::Uuid;
 
 use crate::db::AppState;
 
 // ✅ Audit helper
-use crate::api::audit::{write_audit_log, AuditSeverity};
+use crate::api::audit::{AuditSeverity, write_audit_log};
 
 // ✅ Argon2 verify
 use argon2::{
-    password_hash::{PasswordHash, PasswordVerifier},
     Argon2,
+    password_hash::{PasswordHash, PasswordVerifier},
 };
 
 // ✅ Challenge nonce (rand 0.9)
-use rand::distr::Alphanumeric;
 use rand::Rng;
+use rand::distr::Alphanumeric;
 
 // ─────────────────────────────────────────────────────────────
 // Structures
@@ -93,12 +93,18 @@ pub async fn login_session(
             None,
             None,
             "LOGIN_FAILED",
-            Some(format!("Email not found or no bindkey linked: {}", payload.email)),
+            Some(format!(
+                "Email not found or no bindkey linked: {}",
+                payload.email
+            )),
             AuditSeverity::WARNING,
         )
         .await;
 
-        return Err((StatusCode::UNAUTHORIZED, "Utilisateur ou BindKey non trouvé".into()));
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "Utilisateur ou BindKey non trouvé".into(),
+        ));
     };
 
     // 2) Vérifier présence du hash en DB
@@ -113,12 +119,19 @@ pub async fn login_session(
         )
         .await;
 
-        return Err((StatusCode::UNAUTHORIZED, "Mot de passe non configuré".into()));
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "Mot de passe non configuré".into(),
+        ));
     };
 
     // 3) Vérifier Argon2 (password clair -> hash)
-    let parsed_hash = PasswordHash::new(&db_hash)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Invalid password hash in DB".into()))?;
+    let parsed_hash = PasswordHash::new(&db_hash).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Invalid password hash in DB".into(),
+        )
+    })?;
 
     let ok = Argon2::default()
         .verify_password(payload.password.as_bytes(), &parsed_hash)

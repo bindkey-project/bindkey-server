@@ -3,9 +3,9 @@
 // Helper centralisé pour écrire dans la table audit_logs
 // Objectif : éviter de répéter du SQL partout dans les handlers.
 
-use uuid::Uuid;
-use chrono::Utc;
 use crate::db::AppState;
+use chrono::Utc;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy)]
 pub enum AuditSeverity {
@@ -43,7 +43,7 @@ pub async fn write_audit_log(
         r#"
         INSERT INTO audit_logs (id, user_id, bindkey_id, action, details, severity, created_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
-        "#
+        "#,
     )
     .bind(id)
     .bind(user_id)

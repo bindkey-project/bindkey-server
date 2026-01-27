@@ -8,7 +8,6 @@ pub type PgPool = Pool<Postgres>;
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
-   
 }
 
 /// Crée un pool de connexion PostgreSQL à partir d'une URL.
@@ -18,9 +17,7 @@ pub async fn create_pool(database_url: &str) -> Result<PgPool, sqlx::Error> {
     let pool = PgPool::connect(database_url).await?;
 
     // Test simple : la base répond bien
-    sqlx::query("SELECT 1")
-        .execute(&pool)
-        .await?;
+    sqlx::query("SELECT 1").execute(&pool).await?;
 
     Ok(pool)
 }

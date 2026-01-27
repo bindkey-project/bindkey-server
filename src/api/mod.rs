@@ -1,13 +1,14 @@
 // ─────────────────────────────────────────────────────────────
 // Déclaration des sous-modules de l’API
 // ─────────────────────────────────────────────────────────────
-pub mod models;
-pub mod handlers;
-pub mod routes;
+pub mod audit;
 pub mod auth;
+pub mod handlers;
 pub mod middleware;
+pub mod models;
+pub mod routes;
 
-use axum::{Router, routing::get, extract::State};
+use axum::{Router, extract::State, routing::get};
 
 // État global de l’application
 use crate::db::AppState;
@@ -16,13 +17,8 @@ use crate::api::middleware::auth_middleware::auth_middleware;
 
 // Import des différents groupes de routes
 use crate::api::routes::{
-    user_routes,        
-    bindkey_routes,     
-    disk_routes,        
-    volume_routes,      
-    permission_routes,  
-    session_routes,     
-    mount_routes,       
+    bindkey_routes, disk_routes, mount_routes, permission_routes, session_routes, user_routes,
+    volume_routes,
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -46,7 +42,6 @@ pub fn create_app(state: AppState) -> Router {
     // 3. Application CONDITIONNELLE du middleware
     // 'not(test)' signifie : inclus ce code pour 'cargo run' mais IGNORE-LE pour 'cargo test'
     #[cfg(not(test))]
-    
     let protected_routes = protected_routes.layer(axum::middleware::from_fn_with_state(
         state.clone(),
         auth_middleware, // Utilise l'import simplifié

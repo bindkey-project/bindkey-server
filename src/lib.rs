@@ -1,10 +1,10 @@
 pub mod api;
-pub mod db;
 pub mod config;
+pub mod db;
 
+use crate::db::AppState;
 use axum::Router;
 use dotenvy::dotenv;
-use crate::db::AppState;
 
 /// Cette fonction est maintenant dans la LIB, donc accessible par les tests et le main
 pub async fn create_app_instance() -> Router {
@@ -19,10 +19,7 @@ pub async fn create_app_instance() -> Router {
     sqlx::migrate!().run(&pool).await.expect("Migration failed");
 
     // On définit is_test à true uniquement si on est en mode compilation de test
-    let state = AppState { 
-        db: pool, 
-        
-    };
+    let state = AppState { db: pool };
 
     api::create_app(state)
 }

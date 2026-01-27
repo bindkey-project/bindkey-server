@@ -1,5 +1,5 @@
-use uuid::Uuid;
 use crate::api::models::user::UserRole;
+use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 pub struct AuthUser {

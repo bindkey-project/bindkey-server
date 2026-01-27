@@ -8,19 +8,18 @@
 // ─────────────────────────────────────────────────────────────
 
 use axum::{
+    Extension, Json,
     extract::{Path, State},
     http::StatusCode,
-    Extension,
-    Json,
 };
 use uuid::Uuid;
 
-use crate::db::AppState;
 use crate::api::auth::{AuthUser, require_role};
 use crate::api::models::user::UserRole;
+use crate::db::AppState;
 
 // Audit
-use crate::api::audit::{write_audit_log, AuditSeverity};
+use crate::api::audit::{AuditSeverity, write_audit_log};
 
 // ─────────────────────────────────────────────────────────────
 // Structures
@@ -126,7 +125,10 @@ pub async fn mount_volume(
         .await
         .ok();
 
-        return Err((StatusCode::FORBIDDEN, "Not allowed to mount this volume".into()));
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Not allowed to mount this volume".into(),
+        ));
     }
 
     // 3) Insérer le mount
@@ -246,7 +248,10 @@ pub async fn unmount_volume(
         .await
         .ok();
 
-        return Err((StatusCode::FORBIDDEN, "Not allowed to unmount this mount".into()));
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Not allowed to unmount this mount".into(),
+        ));
     }
 
     // 3) Déjà démonté => 409
@@ -298,7 +303,10 @@ pub async fn unmount_volume(
         Some(auth.user_id),
         None,
         "UNMOUNT",
-        Some(format!("Unmounted mount_id={} volume_id={}", mount_id, volume_id)),
+        Some(format!(
+            "Unmounted mount_id={} volume_id={}",
+            mount_id, volume_id
+        )),
         AuditSeverity::INFO,
     )
     .await

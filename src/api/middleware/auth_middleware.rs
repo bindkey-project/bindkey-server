@@ -1,6 +1,6 @@
 use axum::{
-    extract::{Request, State},  // Request ici (alias axum::extract::Request)
-    http::{header, StatusCode},
+    extract::{Request, State}, // Request ici (alias axum::extract::Request)
+    http::{StatusCode, header},
     middleware::Next,
     response::Response,
 };
@@ -18,15 +18,14 @@ pub async fn auth_middleware(
     State(state): State<AppState>,
     mut req: Request,
     next: Next,
-    
 ) -> Result<Response, (StatusCode, String)> {
-  // --- BLOC CORRIGÉ POUR LES TESTS ---
+    // --- BLOC CORRIGÉ POUR LES TESTS ---
     if cfg!(feature = "skip-auth") {
-        // On injecte un utilisateur "ADMIN" factice 
+        // On injecte un utilisateur "ADMIN" factice
         // pour que les handlers ne plantent pas sur Missing Extension
-        req.extensions_mut().insert(AuthUser { 
+        req.extensions_mut().insert(AuthUser {
             user_id: Uuid::nil(), // 00000000-0000-0000-0000-000000000000
-            role: UserRole::ADMIN 
+            role: UserRole::ADMIN,
         });
         return Ok(next.run(req).await);
     }
@@ -39,9 +38,10 @@ pub async fn auth_middleware(
         .unwrap_or("");
 
     // 2) Extraire "Bearer <token>"
-    let token = auth_header
-        .strip_prefix("Bearer ")
-        .ok_or((StatusCode::UNAUTHORIZED, "Missing/invalid Bearer token".into()))?;
+    let token = auth_header.strip_prefix("Bearer ").ok_or((
+        StatusCode::UNAUTHORIZED,
+        "Missing/invalid Bearer token".into(),
+    ))?;
 
     // 3) Charger la session et vérifier expiration
     let (_session_id, user_id, expires_at) =

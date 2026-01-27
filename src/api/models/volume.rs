@@ -2,10 +2,10 @@
 // Struct Volume : représente un volume chiffré BindKey
 // ─────────────────────────────────────────────────────────────
 
-use serde::{Serialize, Deserialize};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct Volume {

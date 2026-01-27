@@ -2,15 +2,15 @@
 // post / get / delete : méthodes HTTP utilisées pour la gestion des permissions
 use axum::{
     Router,
-    routing::{post, get, delete},
+    routing::{delete, get, post},
 };
 
 // Import des handlers liés au partage et aux permissions
 // Ces handlers contiennent la logique métier de contrôle d’accès
 use crate::api::handlers::permission_handler::{
-    share_volume,             // POST /volumes/:id/share
-    list_volume_permissions,  // GET  /volumes/:id/permissions
-    revoke_permission,        // DELETE /permissions/:id
+    list_volume_permissions, // GET  /volumes/:id/permissions
+    revoke_permission,       // DELETE /permissions/:id
+    share_volume,            // POST /volumes/:id/share
 };
 
 //
@@ -26,21 +26,18 @@ use crate::api::handlers::permission_handler::{
 
 pub fn permission_routes() -> Router<crate::db::AppState> {
     Router::new()
-
         // ─────────────────────────────────────────
         // POST /volumes/:id/share
         // Partage un volume avec un autre utilisateur
         // (READ ou READ_WRITE, avec expiration optionnelle)
         // ─────────────────────────────────────────
         .route("/volumes/:id/share", post(share_volume))
-
         // ─────────────────────────────────────────
         // GET /volumes/:id/permissions
         // Liste tous les droits d’accès associés à un volume
         // → visibilité complète pour audit et gestion
         // ─────────────────────────────────────────
         .route("/volumes/:id/permissions", get(list_volume_permissions))
-
         // ─────────────────────────────────────────
         // DELETE /permissions/:id
         // Révoque explicitement un droit d’accès

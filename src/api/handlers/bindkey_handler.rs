@@ -5,10 +5,9 @@
 // StatusCode→ renvoyer des codes HTTP propres
 // Extension → récupérer AuthUser injecté par le middleware (RBAC)
 use axum::{
-    Json,
-    extract::{State, Path},
+    Extension, Json,
+    extract::{Path, State},
     http::StatusCode,
-    Extension,
 };
 
 // UUID : identifiants uniques (users, bindkeys, etc.)
@@ -52,11 +51,10 @@ pub struct EnrollBindkeyResponse {
 
 /// Handler POST /bindkeys/enroll
 pub async fn enroll_bindkey(
-    Extension(auth): Extension<AuthUser>,      // Utilisateur authentifié (middleware)
-    State(state): State<AppState>,             // Accès DB
+    Extension(auth): Extension<AuthUser>, // Utilisateur authentifié (middleware)
+    State(state): State<AppState>,        // Accès DB
     Json(payload): Json<EnrollBindkeyRequest>, // Body JSON
 ) -> Result<Json<EnrollBindkeyResponse>, (StatusCode, String)> {
-
     // RBAC : seul ENROLLER/ADMIN peut enrôler
     if !require_role(&auth.role, &UserRole::ENROLLER) {
         return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
@@ -92,15 +90,15 @@ pub async fn enroll_bindkey(
                 if db_error.code() == Some(std::borrow::Cow::Borrowed("23505")) {
                     return (
                         StatusCode::CONFLICT, // Code HTTP 409
-                        "Erreur : Cette BindKey est déjà associée à un utilisateur.".into()
+                        "Erreur : Cette BindKey est déjà associée à un utilisateur.".into(),
                     );
                 }
-                
+
                 // Code 23503 = Violation de clé étrangère (L'utilisateur n'existe pas)
                 if db_error.code() == Some(std::borrow::Cow::Borrowed("23503")) {
                     return (
                         StatusCode::NOT_FOUND, // Code HTTP 404
-                        "Erreur : L'utilisateur spécifié est introuvable.".into()
+                        "Erreur : L'utilisateur spécifié est introuvable.".into(),
                     );
                 }
             }
@@ -108,7 +106,7 @@ pub async fn enroll_bindkey(
             // Si c'est une autre erreur inconnue, on garde le 500
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Erreur serveur interne : {}", e)
+                format!("Erreur serveur interne : {}", e),
             )
             // --- FIN DE L'AMÉLIORATION ---
         })?;
@@ -133,17 +131,11 @@ pub async fn get_bindkey(
     State(state): State<AppState>,
     Path(id): Path<Uuid>, // UUID depuis l’URL
 ) -> Result<Json<Bindkey>, (StatusCode, String)> {
-
-    let bindkey = sqlx::query_as::<_, Bindkey>(
-        "SELECT * FROM bindkeys WHERE id = $1"
-    )
-    .bind(id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|_| (
-        StatusCode::NOT_FOUND,
-        "BindKey not found".into()
-    ))?;
+    let bindkey = sqlx::query_as::<_, Bindkey>("SELECT * FROM bindkeys WHERE id = $1")
+        .bind(id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|_| (StatusCode::NOT_FOUND, "BindKey not found".into()))?;
 
     Ok(Json(bindkey))
 }
@@ -161,17 +153,16 @@ pub async fn get_user_bindkeys(
     State(state): State<AppState>,
     Path(user_id): Path<Uuid>,
 ) -> Result<Json<Vec<Bindkey>>, (StatusCode, String)> {
-
-    let bindkeys = sqlx::query_as::<_, Bindkey>(
-        "SELECT * FROM bindkeys WHERE user_id = $1"
-    )
-    .bind(user_id)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        format!("Failed to fetch bindkeys: {}", e)
-    ))?;
+    let bindkeys = sqlx::query_as::<_, Bindkey>("SELECT * FROM bindkeys WHERE user_id = $1")
+        .bind(user_id)
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to fetch bindkeys: {}", e),
+            )
+        })?;
 
     Ok(Json(bindkeys))
 }
@@ -198,23 +189,22 @@ pub async fn update_bindkey_status(
     Path(id): Path<Uuid>,
     Json(payload): Json<UpdateBindkeyStatusRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-
     // RBAC : seul ENROLLER/ADMIN
     if !require_role(&auth.role, &UserRole::ENROLLER) {
         return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
     }
 
-    let res = sqlx::query(
-        "UPDATE bindkeys SET status = $1 WHERE id = $2"
-    )
-    .bind(payload.status)
-    .bind(id)
-    .execute(&state.db)
-    .await
-    .map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        format!("Failed to update status: {}", e)
-    ))?;
+    let res = sqlx::query("UPDATE bindkeys SET status = $1 WHERE id = $2")
+        .bind(payload.status)
+        .bind(id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to update status: {}", e),
+            )
+        })?;
 
     // Si aucune ligne modifiée → BindKey inexistante
     if res.rows_affected() == 0 {
@@ -236,8 +226,8 @@ pub async fn update_bindkey_status(
 #[derive(serde::Deserialize)]
 pub struct ResetBindkeyRequest {
     pub reset_type: String, // perte, corruption, effacement…
-    // ⚠️ performed_by supprimé côté sécurité :
-    // on utilise auth.user_id (sinon spoof possible)
+                            // ⚠️ performed_by supprimé côté sécurité :
+                            // on utilise auth.user_id (sinon spoof possible)
 }
 
 pub async fn reset_bindkey(
@@ -246,7 +236,6 @@ pub async fn reset_bindkey(
     Path(bindkey_id): Path<Uuid>,
     Json(payload): Json<ResetBindkeyRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-
     // RBAC : seul ENROLLER/ADMIN
     if !require_role(&auth.role, &UserRole::ENROLLER) {
         return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
@@ -263,7 +252,7 @@ pub async fn reset_bindkey(
             performed_by
         )
         VALUES ($1, $2, $3, $4)
-        "#
+        "#,
     )
     .bind(reset_id)
     .bind(bindkey_id)
@@ -271,10 +260,12 @@ pub async fn reset_bindkey(
     .bind(auth.user_id) // identifiant réel (depuis token)
     .execute(&state.db)
     .await
-    .map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        format!("Failed to reset bindkey: {}", e)
-    ))?;
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to reset bindkey: {}", e),
+        )
+    })?;
 
     Ok(StatusCode::NO_CONTENT)
 }
