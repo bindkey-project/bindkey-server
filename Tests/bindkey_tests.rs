@@ -407,7 +407,7 @@ async fn test_get_user_bindkeys_list_content() {
     println!("✅ Flow d'authentification validé en mémoire pour : {}", final_data.first_name);
 }*/
 
-#[tokio::test]
+/*#[tokio::test]
 async fn generate_real_admin_hash() {
     // 1. On utilise DIRECTEMENT la valeur que ton logiciel envoie
     // On ne recalcule pas le SHA-256 ici pour éviter les erreurs de concaténation
@@ -421,4 +421,4 @@ async fn generate_real_admin_hash() {
     let final_db_string = chiffrer_aes(&argon_hash);
 
     println!("\n\n🚀 VALEUR À COPIER EN BDD (password_hash) :\n{}\n", final_db_string);
-}
+}*/

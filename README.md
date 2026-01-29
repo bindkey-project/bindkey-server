@@ -24,3 +24,8 @@ mdp stockage :
 -stocker la clé symetrique dans un secret kubernetes et/ou dans parametres d'environnement 
 GOOD 
 
+sudo -E kubectl port-forward --address 0.0.0.0 -n ingress-nginx service/ingress-nginx-controller 443:443
+# Si tu utilises l'Ingress Nginx standard
+kubectl logs -f -l app.kubernetes.io/name=ingress-nginx -n ingress-nginx
+
+kubectl exec -it bindkey-deployment-85d87f9556-j4fzn -c bindkey-db -- psql -U admin_bindkey -d bindkey
