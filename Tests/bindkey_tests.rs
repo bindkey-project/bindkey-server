@@ -1,3 +1,5 @@
+use bindkey_server::api::middleware::hasher_mot_de_passe;
+
 use axum::body as ax_body;
 use axum::{
     body::Body,
