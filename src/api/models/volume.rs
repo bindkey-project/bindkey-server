@@ -11,6 +11,9 @@ use uuid::Uuid;
 pub struct Volume {
     pub id: Uuid,
 
+    // bindkey_id
+    pub bindkey_id: Option<Uuid>,
+
     // Propriétaire du volume
     pub owner_id: Uuid,
 
