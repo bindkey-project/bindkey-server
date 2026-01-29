@@ -2,8 +2,8 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
+use serde_json::{Value, json};
 use tower::util::ServiceExt;
-use serde_json::{json, Value};
 use uuid::Uuid;
 
 // On utilise toujours notre fonction pour instancier l'app réelle
@@ -20,7 +20,8 @@ async fn test_disk_lifecycle_full() {
         "capacity_bytes": 1_000_000_000_i64 // 1 GB
     });
 
-    let res = app.clone()
+    let res = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -33,16 +34,23 @@ async fn test_disk_lifecycle_full() {
         .unwrap();
 
     println!("\n--- ÉTAPE 1 : ENREGISTREMENT DISQUE ---");
-    println!("Statut : {} ({:?})", res.status().as_u16(), res.status().canonical_reason());
+    println!(
+        "Statut : {} ({:?})",
+        res.status().as_u16(),
+        res.status().canonical_reason()
+    );
     assert_eq!(res.status(), StatusCode::OK);
 
-    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let resp_json: Value = serde_json::from_slice(&body).unwrap();
     let disk_id = resp_json["disk_id"].as_str().unwrap();
     println!("Succès : Disque enregistré avec l'ID {}", disk_id);
 
     // --- 2. RÉCUPÉRATION PAR ID (GET /disks/:id) ---
-    let res = app.clone()
+    let res = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -58,7 +66,8 @@ async fn test_disk_lifecycle_full() {
     println!("Statut : 200 OK");
 
     // --- 3. RECHERCHE PAR NUMÉRO DE SÉRIE (GET /disks?serial=...) ---
-    let res = app.clone()
+    let res = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -71,7 +80,9 @@ async fn test_disk_lifecycle_full() {
 
     println!("\n--- ÉTAPE 3 : RECHERCHE PAR SÉRIE ---");
     assert_eq!(res.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let disk_data: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(disk_data["serial_number"], serial);
     println!("Succès : Le numéro de série correspond bien !");
@@ -82,13 +93,16 @@ async fn test_get_disk_not_found() {
     let app = create_app_instance().await;
     let fake_id = Uuid::new_v4();
 
-    let res = app.oneshot(
-        Request::builder()
-            .method("GET")
-            .uri(format!("/disks/{}", fake_id))
-            .body(Body::empty())
-            .unwrap(),
-    ).await.unwrap();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/disks/{}", fake_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
 
     println!("\n--- TEST : DISQUE INEXISTANT ---");
     assert_eq!(res.status(), StatusCode::NOT_FOUND);

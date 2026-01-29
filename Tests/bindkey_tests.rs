@@ -1,46 +1,35 @@
+use axum::body as ax_body;
 use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use tower::util::ServiceExt; 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
+use tower::util::ServiceExt;
 use uuid::Uuid;
 
-// On importe body proprement pour les conversions
-use axum::body as ax_body;
-//use std::env;
-use sqlx::Row; 
-
 use bindkey_server::create_app_instance;
-use ed25519_dalek::{SigningKey, VerifyingKey, Signer};
-use base64::{engine::general_purpose, Engine as _};
-//use rand::rngs::OsRng;
-use bindkey_server::api::handlers::session_handler::{LoginResponse, VerifyRequest, VerifyResponse};
-use axum_test::TestServer;
-use aes_gcm::{Aes256Gcm, KeyInit, Key, Nonce};
-use aes_gcm::aead::Aead;
-use argon2::{
-    password_hash::{PasswordHasher, SaltString},
-    Argon2,
-};
-use bindkey_server::api::middleware::hasher_mot_de_passe;
+
+// ─────────────────────────────────────────────────────────────
+// Test 1 : flow enrollement + doublon
+// ─────────────────────────────────────────────────────────────use bindkey_server::api::middleware::hasher_mot_de_passe;
 use bindkey_server::api::middleware::chiffrer_aes;
 
 #[tokio::test]
 async fn test_full_security_and_enrollment_flow() {
     let app = create_app_instance().await;
 
-    // --- ÉTAPE 1 : CRÉATION DE L'UTILISATEUR ---
+    // ÉTAPE 1 : CRÉATION DE L'UTILISATEUR
+    // NOTE : le handler create_user attend "password" (clair) optionnel
     let user_email = format!("dev_{}@bindkey.io", Uuid::new_v4());
     let create_user_json = json!({
         "first_name": "Marwa",
         "last_name": "Dev",
         "email": user_email,
-        "role": "USER",              
-        "password_hash": "hash123"   
+        "password": "password123"
     });
 
-    let user_res = app.clone()
+    let user_res = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -52,24 +41,34 @@ async fn test_full_security_and_enrollment_flow() {
         .await
         .unwrap();
 
-    assert!(user_res.status().is_success(), "Erreur création user: {:?}", user_res.status());
-    
-    let body_bytes = ax_body::to_bytes(user_res.into_body(), usize::MAX).await.unwrap();
+    assert!(
+        user_res.status().is_success(),
+        "Erreur création user: {:?}",
+        user_res.status()
+    );
+
+    let body_bytes = ax_body::to_bytes(user_res.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let user_data: Value = serde_json::from_slice(&body_bytes).unwrap();
-    let user_id = user_data["id"].as_str().expect("Pas d'ID dans la réponse JSON");
-    
+    let user_id = user_data["id"]
+        .as_str()
+        .expect("Pas d'ID dans la réponse JSON");
+
     println!("\n--- ÉTAPE 1 : USER CRÉÉ ({}) ---", user_id);
 
-    // --- ÉTAPE 2 : PREMIER ENRÔLEMENT ---
+    // ÉTAPE 2 : ENRÔLEMENT DE LA BINDKEY
     let shared_bindkey_uid = format!("BK-STORY1-{}", Uuid::new_v4());
     let enroll_payload = json!({
         "user_id": user_id,
         "bindkey_uid": shared_bindkey_uid,
+        // ⚠️ à adapter si votre endpoint attend une vraie clé base64
         "public_key": "pub_key_secure_2026",
         "fingerprint_template": "biometric_template_hash"
     });
 
-    let enroll_res = app.clone()
+    let enroll_res = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -81,17 +80,22 @@ async fn test_full_security_and_enrollment_flow() {
         .await
         .unwrap();
 
-    // --- AJOUT DE LOGS POUR VOIR L'ERREUR REELLE ---
     let status = enroll_res.status();
-    let body_bytes = ax_body::to_bytes(enroll_res.into_body(), usize::MAX).await.unwrap();
+    let body_bytes = ax_body::to_bytes(enroll_res.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let body_str = String::from_utf8_lossy(&body_bytes);
-    
+
     println!("--- ÉTAPE 2 : STATUT ENRÔLEMENT : {} ---", status);
     println!("--- RÉPONSE SERVEUR : {} ---", body_str);
-    
-    assert!(status.is_success(), "L'enrôlement a échoué avec le message : {}", body_str);
 
-    // --- ÉTAPE 3 : TEST DE SÉCURITÉ (DOUBLON) ---
+    assert!(
+        status.is_success(),
+        "L'enrôlement a échoué avec le message : {}",
+        body_str
+    );
+
+    // ÉTAPE 3 : TEST DOUBLON (doit être bloqué)
     let duplicate_res = app
         .oneshot(
             Request::builder()
@@ -106,25 +110,27 @@ async fn test_full_security_and_enrollment_flow() {
 
     let dup_status = duplicate_res.status();
     println!("\n--- ÉTAPE 3 : TEST SÉCURITÉ (DOUBLON) ---");
-    
     assert_eq!(dup_status, StatusCode::CONFLICT);
-    println!("Résultat : La sécurité a bien bloqué le doublon avec un code 409.");
+    println!("✅ Doublon bloqué avec 409 CONFLICT");
 }
 
+// ─────────────────────────────────────────────────────────────
+// Test 2 : GET /users/:id/bindkeys (liste)
+// ─────────────────────────────────────────────────────────────
 #[tokio::test]
 async fn test_get_user_bindkeys_list() {
     let app = create_app_instance().await;
-    
+
     let user_email = format!("test_list_{}@bindkey.io", Uuid::new_v4());
     let create_user_json = json!({
         "first_name": "Test",
         "last_name": "List",
         "email": user_email,
-        "role": "USER",
-        "password_hash": "hash123"
+        "password": "password123"
     });
 
-    let user_res = app.clone()
+    let user_res = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -136,7 +142,9 @@ async fn test_get_user_bindkeys_list() {
         .await
         .unwrap();
 
-    let body_bytes = ax_body::to_bytes(user_res.into_body(), usize::MAX).await.unwrap();
+    let body_bytes = ax_body::to_bytes(user_res.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let user_data: Value = serde_json::from_slice(&body_bytes).unwrap();
     let user_id = user_data["id"].as_str().expect("L'ID user est manquant");
 
@@ -155,6 +163,9 @@ async fn test_get_user_bindkeys_list() {
     assert!(response.status().is_success());
 }
 
+// ─────────────────────────────────────────────────────────────
+// Test 3 : GET /bindkeys/:id (not found)
+// ─────────────────────────────────────────────────────────────
 #[tokio::test]
 async fn test_get_bindkey_not_found() {
     let app = create_app_instance().await;
@@ -175,48 +186,80 @@ async fn test_get_bindkey_not_found() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
+// ─────────────────────────────────────────────────────────────
+// Test 4 : contenu liste bindkeys non vide
+// ─────────────────────────────────────────────────────────────
 #[tokio::test]
 async fn test_get_user_bindkeys_list_content() {
     let app = create_app_instance().await;
-    
+
     let user_email = format!("list_test_{}@test.com", Uuid::new_v4());
-    let user_res = app.clone().oneshot(
-        Request::builder().method("POST").uri("/users")
-            .header("Content-Type", "application/json")
-            .body(Body::from(serde_json::to_vec(&json!({
-                "first_name": "List", 
-                "last_name": "Tester", 
-                "email": user_email,
-                "role": "USER",
-                "password_hash": "hash123"
-            })).unwrap())).unwrap()
-    ).await.unwrap();
-    
-    let body_bytes = ax_body::to_bytes(user_res.into_body(), usize::MAX).await.unwrap();
+    let user_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/users")
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "first_name": "List",
+                        "last_name": "Tester",
+                        "email": user_email,
+                        "password": "password123"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let body_bytes = ax_body::to_bytes(user_res.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let user_data: Value = serde_json::from_slice(&body_bytes).unwrap();
     let user_id_str = user_data["id"].as_str().expect("Pas d'ID");
 
     let bindkey_uid = format!("BK-LIST-{}", Uuid::new_v4());
-    app.clone().oneshot(
-        Request::builder().method("POST").uri("/bindkeys/enroll")
-            .header("Content-Type", "application/json")
-            .body(Body::from(serde_json::to_vec(&json!({
-                "user_id": user_id_str,
-                "bindkey_uid": bindkey_uid,
-                "public_key": "key_list_test",
-                "fingerprint_template": "template_list_test"
-            })).unwrap())).unwrap()
-    ).await.unwrap();
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/bindkeys/enroll")
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "user_id": user_id_str,
+                        "bindkey_uid": bindkey_uid,
+                        "public_key": "key_list_test",
+                        "fingerprint_template": "template_list_test"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
 
-    let response = app.oneshot(
-        Request::builder().method("GET").uri(format!("/users/{}/bindkeys", user_id_str))
-            .body(Body::empty()).unwrap()
-    ).await.unwrap();
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/users/{}/bindkeys", user_id_str))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
 
     println!("\n--- TEST : CONTENU DE LA LISTE ---");
     let status = response.status();
-    let body_bytes = ax_body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let list: Vec<Value> = serde_json::from_slice(&body_bytes).expect("Body n'est pas une liste JSON");
+    let body_bytes = ax_body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let list: Vec<Value> =
+        serde_json::from_slice(&body_bytes).expect("Body n'est pas une liste JSON");
 
     assert!(status.is_success());
     assert!(!list.is_empty(), "La liste ne devrait pas être vide !");

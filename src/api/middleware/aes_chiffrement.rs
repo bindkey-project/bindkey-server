@@ -1,10 +1,12 @@
 use aes_gcm::{
-    aead::{Aead, KeyInit, AeadCore, OsRng}, // On importe OsRng ICI
-    Aes256Gcm, Nonce, Key
+    Aes256Gcm,
+    Key,
+    Nonce,
+    aead::{Aead, AeadCore, KeyInit, OsRng}, // On importe OsRng ICI
 };
 // Supprime l'import "use rand::rngs::OsRng;" s'il y est encore
+use base64::{Engine as _, engine::general_purpose};
 use std::env;
-use base64::{engine::general_purpose, Engine as _};
 /// Chiffre une chaîne (le hash Argon2) en AES-256-GCM
 pub fn chiffrer_aes(donnees: &str) -> String {
     let key_hex = env::var("PWD_ENCRYPTION_KEY").expect("PWD_ENCRYPTION_KEY manquante");
@@ -13,7 +15,7 @@ pub fn chiffrer_aes(donnees: &str) -> String {
     let cipher = Aes256Gcm::new(key);
 
     // Maintenant OsRng est compatible !
-    let nonce = Aes256Gcm::generate_nonce(&mut OsRng); 
+    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
 
     let mut ciphertext = cipher
         .encrypt(&nonce, donnees.as_bytes())
@@ -38,7 +40,9 @@ pub fn dechiffrer_aes(blob_base64: &str) -> String {
         .expect("Échec du décodage Base64");
 
     // On sépare le nonce (12 premiers octets) du reste (le message)
-    if full_data.len() < 12 { panic!("Données corrompues : trop courtes"); }
+    if full_data.len() < 12 {
+        panic!("Données corrompues : trop courtes");
+    }
     let (nonce_slice, ciphertext) = full_data.split_at(12);
     let nonce = Nonce::from_slice(nonce_slice);
 

@@ -1,6 +1,6 @@
 // Permet de sérialiser / désérialiser la structure en JSON
 // (réponses API, logs, éventuels échanges client-serveur)
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 // Permet à SQLx de mapper automatiquement une ligne PostgreSQL
 // vers la struct Rust MountedVolume

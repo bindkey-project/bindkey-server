@@ -91,3 +91,4 @@ skip-auth = []
 [dev-dependencies]
 # On force l'activation de la feature pour tout ce qui est dans le dossier Tests/
 bindkey-server = { path = ".", features = ["skip-auth"] }
+

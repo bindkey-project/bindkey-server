@@ -4,7 +4,11 @@
 // - Path : paramètres d’URL (/volumes/:id)
 // - StatusCode : réponses HTTP claires
 // - Extension : récupérer AuthUser injecté par le middleware
-use axum::{Json, extract::{State, Path}, http::StatusCode, Extension};
+use axum::{
+    Extension, Json,
+    extract::{Path, State},
+    http::StatusCode,
+};
 
 // UUID
 use uuid::Uuid;
@@ -42,7 +46,7 @@ pub struct CreateVolumeResponse {
 }
 
 pub async fn create_volume(
-    Extension(auth): Extension<AuthUser>,   // user authentifié
+    Extension(auth): Extension<AuthUser>, // user authentifié
     State(state): State<AppState>,
     Json(payload): Json<CreateVolumeRequest>,
 ) -> Result<Json<CreateVolumeResponse>, (StatusCode, String)> {
@@ -53,7 +57,7 @@ pub async fn create_volume(
         r#"
         INSERT INTO volumes (id, owner_id, disk_id, name, size_bytes, encrypted_key)
         VALUES ($1, $2, $3, $4, $5, $6)
-        "#
+        "#,
     )
     .bind(volume_id)
     .bind(auth.user_id)
@@ -124,7 +128,7 @@ pub async fn list_user_volumes(
     }
 
     let list = sqlx::query_as::<_, Volume>(
-        "SELECT * FROM volumes WHERE owner_id = $1 ORDER BY created_at DESC"
+        "SELECT * FROM volumes WHERE owner_id = $1 ORDER BY created_at DESC",
     )
     .bind(user_id)
     .fetch_all(&state.db)
@@ -176,7 +180,7 @@ pub async fn update_volume(
             size_bytes = COALESCE($2, size_bytes),
             updated_at = now()
         WHERE id = $3
-        "#
+        "#,
     )
     .bind(payload.name)
     .bind(payload.size_bytes)

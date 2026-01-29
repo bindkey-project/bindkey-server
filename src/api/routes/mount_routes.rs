@@ -1,15 +1,12 @@
 // Axum Router : permet de définir les routes HTTP
 // post : méthode HTTP utilisée ici pour déclencher des actions
-use axum::{
-    Router,
-    routing::post,
-};
+use axum::{Router, routing::post};
 
 // Import des handlers de montage / démontage
 // Ces handlers assurent la traçabilité des accès aux volumes
 use crate::api::handlers::mount_handler::{
-    mount_volume,     // POST /mount
-    unmount_volume,   // POST /unmount/:id
+    mount_volume,   // POST /mount
+    unmount_volume, // POST /unmount/:id
 };
 
 //
@@ -25,14 +22,12 @@ use crate::api::handlers::mount_handler::{
 
 pub fn mount_routes() -> Router<crate::db::AppState> {
     Router::new()
-
         // ─────────────────────────────────────────
         // POST /mount
         // Monte un volume chiffré pour un utilisateur
         // → création d’un événement de montage
         // ─────────────────────────────────────────
         .route("/mount", post(mount_volume))
-
         // ─────────────────────────────────────────
         // POST /unmount/:id
         // Démontage explicite d’un volume monté

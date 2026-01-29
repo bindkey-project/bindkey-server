@@ -1,116 +1,149 @@
 use axum::{
-    Json,
-    extract::{State, Path, Query},
+    Extension, Json,
+    extract::{Path, Query, State},
     http::StatusCode,
-    Extension,
 };
 
-// UUID pour identifier de manière unique les utilisateurs
 use uuid::Uuid;
 
-// Accès à la base de données (pool PostgreSQL)
+use crate::api::auth::{AuthUser, require_role};
+use crate::api::models::user::{User, UserRole, UserStatus};
 use crate::db::AppState;
 
-// Modèle User + enums associés (rôle et statut)
-use crate::api::models::user::{UserRole, User, UserStatus};
+// Crypto
+use argon2::password_hash::rand_core::{OsRng, RngCore};
+use argon2::{
+    Argon2,
+    password_hash::{PasswordHasher, SaltString},
+};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 
-// Auth (RBAC)
-use crate::api::auth::{AuthUser, require_role};
+// Middleware crypto
+use crate::api::middleware;
+
+// Audit
+use crate::api::audit::{AuditSeverity, write_audit_log};
 
 //
 // ─────────────────────────────────────────────────────────────
 // POST /users
-// Objectif : créer un nouvel utilisateur BindKey
-// RBAC : seul ENROLLER / ADMIN peut créer des utilisateurs
 // ─────────────────────────────────────────────────────────────
-//
 
 #[derive(serde::Deserialize)]
 pub struct CreateUserRequest {
-    pub first_name: String,  // Prénom
-    pub last_name: String,   // Nom
-    pub email: String,   
-    pub role: UserRole,   
-    pub password_hash: String,
+    pub first_name: String,
+    pub last_name: String,
+    pub email: String,
+    pub password: Option<String>, // password EN CLAIR
 }
 
 #[derive(serde::Serialize)]
 pub struct CreateUserResponse {
     pub id: Uuid,
     pub message: String,
+    pub recovery_code: String, // affiché UNE seule fois
 }
 
-use crate::api::middleware;  // On importe tes nouveaux outils
-
 pub async fn create_user(
-    auth_opt: Option<Extension<AuthUser>>, 
+    Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
     Json(payload): Json<CreateUserRequest>,
-) -> Result<Json<CreateUserResponse>, String> {
-
-    // 1. (Optionnel) Vérification du rôle ENROLLER si on n'est pas en mode skip-auth
-    if let Some(Extension(auth)) = auth_opt {
-        if !require_role(&auth.role, &UserRole::ENROLLER) {
-            return Err("ENROLLER/ADMIN required".into());
-        }
+) -> Result<Json<CreateUserResponse>, (StatusCode, String)> {
+    // RBAC
+    if !require_role(&auth.role, &UserRole::ENROLLER) {
+        return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
     }
 
-    // 2. LOGIQUE DE SÉCURITÉ : La double protection
-    // On prend le mot de passe reçu, on le hache avec Argon2, puis on le chiffre avec AES
-    let argon2_hash = middleware::hachage_argon2::hasher_mot_de_passe(&payload.password_hash);
-    let final_encrypted_blob = middleware::aes_chiffrement::chiffrer_aes(&argon2_hash);
-
     let user_id = Uuid::new_v4();
-    // On applique la même logique pour le code de récupération si besoin
-    let recovery_code_hash = "TODO_SECURE_HASH".to_string();
 
-    // 3. Insertion en Base de Données
-    let query = r#"
+    // ── Recovery code (random + hash)
+    let mut raw = [0u8; 16];
+    OsRng.fill_bytes(&mut raw);
+    let recovery_code = URL_SAFE_NO_PAD.encode(raw);
+
+    let argon2 = Argon2::default();
+    let salt = SaltString::generate(&mut OsRng);
+
+    let recovery_code_hash = argon2
+        .hash_password(recovery_code.as_bytes(), &salt)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .to_string();
+
+    // ── Password (optionnel)
+    let password_hash_encrypted: Option<String> = if let Some(password) = &payload.password {
+        let argon2_hash = middleware::hachage_argon2::hasher_mot_de_passe(password);
+        Some(middleware::aes_chiffrement::chiffrer_aes(&argon2_hash))
+    } else {
+        None
+    };
+
+    // ── INSERT user
+    sqlx::query(
+        r#"
         INSERT INTO users (
-            id, 
-            first_name, 
-            last_name, 
-            email,
-            role, 
-            status, 
-            password_hash, 
-            recovery_code_hash
+            id, first_name, last_name, email,
+            role, status,
+            password_hash, recovery_code_hash,
+            created_at, updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6, $7)
-    "#;
+        VALUES (
+            $1, $2, $3, $4,
+            'USER', 'ACTIVE',
+            $5, $6,
+            now(), now()
+        )
+        "#,
+    )
+    .bind(user_id)
+    .bind(&payload.first_name)
+    .bind(&payload.last_name)
+    .bind(&payload.email)
+    .bind(password_hash_encrypted)
+    .bind(recovery_code_hash)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
 
-    sqlx::query(query)
-        .bind(user_id)               
-        .bind(&payload.first_name)    
-        .bind(&payload.last_name)     
-        .bind(&payload.email)         
-        .bind(&payload.role)          
-        .bind(&final_encrypted_blob) // <--- ON ENREGISTRE LE BLOC AES ICI
-        .bind(recovery_code_hash)     
-        .execute(&state.db)
-        .await
-        .map_err(|e| format!("Erreur SQL: {}", e))?;
+    // ── Audit
+    let _ = write_audit_log(
+        &state,
+        Some(auth.user_id),
+        None,
+        "USER_CREATE",
+        Some(format!("created_user_id={user_id} email={}", payload.email)),
+        AuditSeverity::INFO,
+    )
+    .await;
+
+    if payload.password.is_some() {
+        let _ = write_audit_log(
+            &state,
+            Some(auth.user_id),
+            None,
+            "USER_PASSWORD_SET",
+            Some(format!("user_id={user_id}")),
+            AuditSeverity::INFO,
+        )
+        .await;
+    }
 
     Ok(Json(CreateUserResponse {
         id: user_id,
         message: "Utilisateur créé avec succès".into(),
+        recovery_code,
     }))
 }
+
 //
 // ─────────────────────────────────────────────────────────────
 // GET /users/:id
-// Objectif : récupérer un utilisateur par son ID
 // ─────────────────────────────────────────────────────────────
-//
 
 pub async fn get_user_by_id(
-    Extension(auth): Extension<AuthUser>, // ✅ Utilisateur authentifié requis
+    Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
     Path(user_id): Path<Uuid>,
 ) -> Result<Json<User>, (StatusCode, String)> {
-
-    // USER : accès uniquement à lui-même
-    // ENROLLER/ADMIN : accès à tous
     let is_self = auth.user_id == user_id;
     let can_read_any = require_role(&auth.role, &UserRole::ENROLLER);
 
@@ -118,16 +151,11 @@ pub async fn get_user_by_id(
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
 
-    let user = sqlx::query_as::<_, User>(
-        "SELECT * FROM users WHERE id = $1"
-    )
-    .bind(user_id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|_| (
-        StatusCode::NOT_FOUND,
-        "User not found".into()
-    ))?;
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|_| (StatusCode::NOT_FOUND, "User not found".into()))?;
 
     Ok(Json(user))
 }
@@ -136,7 +164,6 @@ pub async fn get_user_by_id(
 // ─────────────────────────────────────────────────────────────
 // GET /users?email=...
 // ─────────────────────────────────────────────────────────────
-//
 
 #[derive(serde::Deserialize)]
 pub struct UserEmailQuery {
@@ -144,26 +171,19 @@ pub struct UserEmailQuery {
 }
 
 pub async fn get_user_by_email(
-    Extension(auth): Extension<AuthUser>, // ✅ Utilisateur authentifié requis
+    Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
     Query(q): Query<UserEmailQuery>,
 ) -> Result<Json<User>, (StatusCode, String)> {
-
-    // RBAC : ENROLLER ou ADMIN
     if !require_role(&auth.role, &UserRole::ENROLLER) {
         return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
     }
 
-    let user = sqlx::query_as::<_, User>(
-        "SELECT * FROM users WHERE email = $1"
-    )
-    .bind(&q.email)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|_| (
-        StatusCode::NOT_FOUND,
-        "User not found".into()
-    ))?;
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
+        .bind(&q.email)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|_| (StatusCode::NOT_FOUND, "User not found".into()))?;
 
     Ok(Json(user))
 }
@@ -172,7 +192,6 @@ pub async fn get_user_by_email(
 // ─────────────────────────────────────────────────────────────
 // PATCH /users/:id/status
 // ─────────────────────────────────────────────────────────────
-//
 
 #[derive(serde::Deserialize)]
 pub struct UpdateUserStatusRequest {
@@ -180,38 +199,46 @@ pub struct UpdateUserStatusRequest {
 }
 
 pub async fn update_user_status(
-    Extension(auth): Extension<AuthUser>, // ✅ Utilisateur authentifié requis
+    Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
     Path(user_id): Path<Uuid>,
     Json(payload): Json<UpdateUserStatusRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-
-    // RBAC : ENROLLER ou ADMIN
     if !require_role(&auth.role, &UserRole::ENROLLER) {
         return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
     }
 
     let res = sqlx::query(
-        "UPDATE users
-         SET status = $1,
-             updated_at = now()
-         WHERE id = $2"
+        r#"
+        UPDATE users
+        SET status = $1, updated_at = now()
+        WHERE id = $2
+        "#,
     )
     .bind(payload.status)
     .bind(user_id)
     .execute(&state.db)
     .await
-    .map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        format!("Erreur SQL: {}", e)
-    ))?;
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     if res.rows_affected() == 0 {
-        return Err((
-            StatusCode::NOT_FOUND,
-            "User not found".into()
-        ));
+        return Err((StatusCode::NOT_FOUND, "User not found".into()));
     }
+
+    let action = match payload.status {
+        UserStatus::ACTIVE => "USER_ENABLE",
+        UserStatus::DISABLED => "USER_DISABLE",
+    };
+
+    let _ = write_audit_log(
+        &state,
+        Some(auth.user_id),
+        None,
+        action,
+        Some(format!("target_user_id={user_id}")),
+        AuditSeverity::WARNING,
+    )
+    .await;
 
     Ok(StatusCode::NO_CONTENT)
 }

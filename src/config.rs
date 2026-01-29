@@ -1,11 +1,9 @@
 use std::env;
 
- 
 //   On importe le module standard "env" de Rust.
 //   Il permet de lire les variables d’environnement (ENV VARS) :
 //   - depuis le système (ex: export BINDKEY_PORT=8080)
 //   - depuis le fichier .env (grâce à dotenvy)
-
 
 //Structure représentant la configuration globale du serveur BindKey.
 ///
@@ -22,19 +20,15 @@ pub struct Config {
     pub database_url: String,
 }
 
-
-
 impl Config {
-
     /// Construit une Config à partir des variables d'environnement.
     ///
     /// - charge automatiquement le fichier .env (si présent)
     /// - lit BINDKEY_PORT
     /// - lit DATABASE_URL
     /// - applique une valeur par défaut pour le port si besoin
-    /// 
+    ///
     pub fn from_env() -> Self {
-
         // ------------------------------------------------------------------
         // 1. Charge automatiquement le fichier `.env` s'il existe.
         // ------------------------------------------------------------------
@@ -52,7 +46,6 @@ impl Config {
         //
         dotenvy::dotenv().ok();
 
-
         // ------------------------------------------------------------------
         // 2. Lecture de la variable d’environnement "BINDKEY_PORT"
         // ------------------------------------------------------------------
@@ -69,8 +62,6 @@ impl Config {
         //
         let port = env::var("BINDKEY_PORT")
             .unwrap_or_else(|_| "8080".into())
-
-
             // ------------------------------------------------------------------
             // 3. On convertit la chaîne de caractères en u16
             // ------------------------------------------------------------------
@@ -86,10 +77,10 @@ impl Config {
         // Pas de valeur par défaut ici : on considère que c'est OBLIGATOIRE.
         // Si elle n'est pas définie, le serveur panic avec un message clair.
 
-        let database_url= env::var("DATABASE_URL")
-        .expect("DATABASE_URL muste be set in .env or environment");
+        let database_url =
+            env::var("DATABASE_URL").expect("DATABASE_URL muste be set in .env or environment");
 
-            // ------------------------------------------------------------------
+        // ------------------------------------------------------------------
         // 4. Retourne enfin une instance Config
         // ------------------------------------------------------------------
         //
@@ -98,6 +89,6 @@ impl Config {
         // Cela permet de faire :
         //    let cfg = Config::from_env();
         //
-        Config { port,database_url }
+        Config { port, database_url }
     }
 }

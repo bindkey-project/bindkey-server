@@ -2,9 +2,9 @@
 // Imports des bibliothèques nécessaires
 // ─────────────────────────────────────────────────────────────
 
-// Permet de transformer les structs en JSON (Serialize) 
+// Permet de transformer les structs en JSON (Serialize)
 // et d'accepter des données JSON en entrée API (Deserialize).
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 // Permet à SQLx de convertir automatiquement une ligne SQL
 // en instance de la struct (User, Device, etc.).
@@ -15,7 +15,6 @@ use uuid::Uuid;
 
 // DateTime<Utc> = type utilisé pour les timestamps PostgreSQL (TIMESTAMPTZ)
 use chrono::{DateTime, Utc};
-
 
 // ─────────────────────────────────────────────────────────────
 // STRUCT User : correspond exactement à la table PostgreSQL "users"
@@ -71,4 +70,3 @@ pub enum UserStatus {
     ACTIVE,
     DISABLED,
 }
-
