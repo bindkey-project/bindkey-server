@@ -121,8 +121,12 @@ pub async fn login_session(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let _ = write_audit_log(&state, Some(user_id), Some(bindkey_id), "LOGIN", Some(format!("session_id={session_id}")), AuditSeverity::INFO).await;
-
+   if let Err(e) = write_audit_log(&state, Some(user_id), Some(bindkey_id), "LOGIN", Some(format!("session_id={session_id}")), AuditSeverity::INFO).await {
+    // Cela s'affichera dans 'kubectl logs'
+    eprintln!("❌ ERREUR AUDIT LOG : {:?}", e);
+} else {
+    println!("✅ Audit log écrit avec succès pour user_id: {}", user_id);
+}
     Ok(Json(LoginResponse { session_id, auth_challenge }))
 }
 
