@@ -1,9 +1,6 @@
 // Modèle représentant la table `users`
 pub mod user;
 
-// Modèle représentant la table `devices` (périphériques enregistrés)
-pub mod device;
-
 // Modèle pour la table `bindkeys` (clés d’accès ou identifiants)
 pub mod bindkey;
 
