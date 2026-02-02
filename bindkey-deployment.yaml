@@ -30,7 +30,7 @@ spec:
       containers:
         # --- COMPOSANT : API SERVEUR ---
         - name: bindkey-api
-          image: ghcr.io/bindkey-project/bindkey-server/bindkey-server:v1
+          image: ghcr.io/bindkey-project/bindkey-server/bindkey-server:v1.1
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
