@@ -420,4 +420,4 @@ async fn generate_real_admin_hash() {
     let final_db_string = chiffrer_aes(&argon_hash);
 
     println!("\n\n🚀 VALEUR À COPIER EN BDD (password_hash) :\n{}\n", final_db_string);
-}
+}*/
