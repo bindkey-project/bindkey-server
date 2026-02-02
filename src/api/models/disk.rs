@@ -32,15 +32,6 @@ pub struct Disk {
     /// BIGINT en SQL → i64 en Rust.
     pub capacity_bytes: i64,
 
-    /// Label lisible optionnel du disque.
-    ///
-    /// Exemples :
-    /// - "SanDisk Ultra 32GB"
-    /// - "Kingston USB 3.0"
-    ///
-    /// Colonne TEXT nullable → Option<String>.
-    pub label: Option<String>,
-
     /// Date de création en base de données.
     pub created_at: DateTime<Utc>,
 }

@@ -5,7 +5,7 @@
 // - StatusCode : codes HTTP explicites
 use axum::{
     Json,
-    extract::{Path, Query, State},
+    extract::{State, Path, Query},
     http::StatusCode,
 };
 
@@ -21,7 +21,7 @@ use crate::api::models::disk::Disk;
 // ─────────────────────────────────────────────────────────────
 // POST /disks/register
 // ─────────────────────────────────────────────────────────────
-// 🎯 Objectif :
+// Objectif :
 // Enregistrer un disque physique (USB, SSD, etc.) dans le système BindKey.
 //
 // Cas d’usage :
@@ -40,15 +40,16 @@ pub struct RegisterDiskRequest {
 // Réponse envoyée après enregistrement
 #[derive(serde::Serialize)]
 pub struct RegisterDiskResponse {
-    pub disk_id: Uuid,   // UUID généré côté serveur
-    pub message: String, // Message informatif
+    pub disk_id: Uuid,         // UUID généré côté serveur
+    pub message: String,       // Message informatif
 }
 
 // Handler principal : POST /disks/register
 pub async fn register_disk(
-    State(state): State<AppState>,            // Connexion DB partagée
-    Json(payload): Json<RegisterDiskRequest>, // JSON reçu depuis le client
+    State(state): State<AppState>,              // Connexion DB partagée
+    Json(payload): Json<RegisterDiskRequest>,   // JSON reçu depuis le client
 ) -> Result<Json<RegisterDiskResponse>, (StatusCode, String)> {
+
     // Génération d’un identifiant unique pour le disque
     let disk_id = Uuid::new_v4();
 
@@ -57,14 +58,17 @@ pub async fn register_disk(
         r#"
         INSERT INTO disks (id, serial_number, capacity_bytes)
         VALUES ($1, $2, $3)
-        "#,
+        "#
     )
-    .bind(disk_id) // $1 : UUID du disque
-    .bind(&payload.serial_number) // $2 : numéro de série
-    .bind(payload.capacity_bytes) // $3 : capacité
+    .bind(disk_id)                 // $1 : UUID du disque
+    .bind(&payload.serial_number)  // $2 : numéro de série
+    .bind(payload.capacity_bytes)  // $3 : capacité
     .execute(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
+    .map_err(|e| (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        format!("SQL error: {e}")
+    ))?;
 
     // Réponse retournée au client
     Ok(Json(RegisterDiskResponse {
@@ -76,29 +80,33 @@ pub async fn register_disk(
 // ─────────────────────────────────────────────────────────────
 // GET /disks/:id
 // ─────────────────────────────────────────────────────────────
-// 🎯 Objectif :
+// Objectif :
 // Récupérer les informations complètes d’un disque via son UUID
 // ─────────────────────────────────────────────────────────────
 
 pub async fn get_disk(
-    State(state): State<AppState>, // Connexion DB
-    Path(id): Path<Uuid>,          // UUID extrait depuis l’URL
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
 ) -> Result<Json<Disk>, (StatusCode, String)> {
-    // Recherche du disque en base
     let disk = sqlx::query_as::<_, Disk>("SELECT * FROM disks WHERE id = $1")
         .bind(id)
         .fetch_one(&state.db)
         .await
-        .map_err(|_| (StatusCode::NOT_FOUND, "Disk not found".into()))?;
+        .map_err(|e| match e {
+            sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Disk not found".into()),
+            other => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("SQL error: {other}"),
+            ),
+        })?;
 
-    // Retourne le disque trouvé
     Ok(Json(disk))
 }
 
 // ─────────────────────────────────────────────────────────────
 // GET /disks?serial=...
 // ─────────────────────────────────────────────────────────────
-// 🎯 Objectif :
+// Objectif :
 // Retrouver un disque à partir de son numéro de série.
 //
 // Cas critique sécurité / logique :
@@ -114,16 +122,21 @@ pub struct DiskSerialQuery {
 
 // Handler : GET /disks?serial=...
 pub async fn get_disk_by_serial(
-    State(state): State<AppState>,    // Connexion DB
-    Query(q): Query<DiskSerialQuery>, // Paramètre ?serial=
+    State(state): State<AppState>,
+    Query(q): Query<DiskSerialQuery>,
 ) -> Result<Json<Disk>, (StatusCode, String)> {
-    // Recherche du disque par numéro de série
     let disk = sqlx::query_as::<_, Disk>("SELECT * FROM disks WHERE serial_number = $1")
         .bind(&q.serial)
         .fetch_one(&state.db)
         .await
-        .map_err(|_| (StatusCode::NOT_FOUND, "Disk not found".into()))?;
+        .map_err(|e| match e {
+            sqlx::Error::RowNotFound => (StatusCode::NOT_FOUND, "Disk not found".into()),
+            other => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("SQL error: {other}"),
+            ),
+        })?;
 
-    // Retourne le disque trouvé
     Ok(Json(disk))
 }
+
