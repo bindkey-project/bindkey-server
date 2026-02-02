@@ -8,16 +8,12 @@ use crate::db::AppState;
 use axum::{Json, extract::State, http::StatusCode};
 use chrono::{Duration, Utc};
 use uuid::Uuid;
-use crate::db::AppState;
-use crate::api::middleware;
 use base64::{Engine as _, engine::general_purpose};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use std::convert::TryInto;
 use rand::{Rng, distr::Alphanumeric, rng};
 use sqlx::Row;
-use std::convert::TryInto;
-use uuid::Uuid;
-use crate::api::audit::{AuditSeverity, write_audit_log};
+
 
 // ─────────────────────────────────────────────────────────────
 // Structures d’API (JSON)
@@ -146,6 +142,7 @@ pub async fn verify_session(
     Json(payload): Json<VerifyRequest>,
 ) -> Result<Json<VerifyResponse>, (StatusCode, String)> {
     
+    // 1. Récupération de la session et des infos utilisateur/clé
     let row = sqlx::query(
         r#"
         SELECT s.user_id, s.bindkey_id, s.auth_challenge,
@@ -160,95 +157,65 @@ pub async fn verify_session(
     .fetch_optional(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-    .ok_or((StatusCode::UNAUTHORIZED, "Session invalide".into()))?;
+    .ok_or((StatusCode::UNAUTHORIZED, "Session invalide ou expirée".into()))?;
    
     let user_id: Uuid = row.get("user_id");
     let bindkey_id: Uuid = row.get("bindkey_id");
-
     let challenge: String = row.get("auth_challenge");
     let public_key_b64: String = row.get("public_key");
 
-    // Décodage clé publique
+    // 2. Décodage de la clé publique Ed25519
     let pub_key_bytes = general_purpose::STANDARD.decode(&public_key_b64)
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Clé publique invalide".into()))?;
+    
     let pub_key_array: [u8; 32] = pub_key_bytes.try_into()
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Taille clé publique incorrecte".into()))?;
+    
     let verifying_key = VerifyingKey::from_bytes(&pub_key_array)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Format clé Ed25519 invalide".into()))?;
 
-    // Décodage signature
+    // 3. Décodage de la signature reçue
     let sig_bytes = general_purpose::STANDARD.decode(&payload.signature)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Signature Base64 invalide".into()))?;
+    
     let sig_array: [u8; 64] = sig_bytes.try_into()
         .map_err(|_| (StatusCode::BAD_REQUEST, "Taille signature incorrecte".into()))?;
-    let pub_key_bytes = general_purpose::STANDARD
-        .decode(&public_key_b64)
-        .map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Clé publique invalide".into(),
-            )
-        })?;
-    let pub_key_array: [u8; 32] = pub_key_bytes.try_into().map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Taille clé publique incorrecte".into(),
-        )
-    })?;
-    let verifying_key = VerifyingKey::from_bytes(&pub_key_array).map_err(|_| {
-        (
-            StatusCode::BAD_REQUEST,
-            "Format clé Ed25519 invalide".into(),
-        )
-    })?;
-
-    // Décodage signature
-    let sig_bytes = general_purpose::STANDARD
-        .decode(&payload.signature)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Signature Base64 invalide".into()))?;
-    let sig_array: [u8; 64] = sig_bytes.try_into().map_err(|_| {
-        (
-            StatusCode::BAD_REQUEST,
-            "Taille signature incorrecte".into(),
-        )
-    })?;
+    
     let signature = Signature::from_bytes(&sig_array);
 
-   
-
-    // Logs Debug
-    println!("DEBUG: Challenge string: '{}'", challenge);
-    println!("DEBUG: Challenge bytes: {:?}", challenge.as_bytes());
-    println!("DEBUG: Signature bytes: {:?}", sig_array);
-
-    // Vérification cryptographique
+    // 4. Vérification cryptographique
     verifying_key.verify(challenge.as_bytes(), &signature)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Signature invalide".into()))?;
+        .map_err(|_| {
+            // Optionnel : tu pourrais loguer un VERIFY_FAILED ici pour la sécurité
+            (StatusCode::UNAUTHORIZED, "Signature invalide".into())
+        })?;
 
-    // Génération des tokens
-    // Génération des tokens
+    // 5. Génération des tokens de session finale
     let server_token = random_string(64);
     let local_token = random_string(64);
     let expires_at = Utc::now() + Duration::minutes(30);
 
+    // Mise à jour de la session : on retire le challenge (usage unique) et on met les tokens
     sqlx::query(
         "UPDATE sessions SET server_token=$1, local_token=$2, auth_challenge=NULL, expires_at=$3 WHERE id=$4"
-        "UPDATE sessions SET server_token=$1, local_token=$2, auth_challenge=NULL, expires_at=$3 WHERE id=$4"
     )
-    .bind(&server_token).bind(&local_token).bind(expires_at).bind(payload.session_id)
-    .execute(&state.db).await
-    .bind(&server_token).bind(&local_token).bind(expires_at).bind(payload.session_id)
-    .execute(&state.db).await
+    .bind(&server_token)
+    .bind(&local_token)
+    .bind(expires_at)
+    .bind(payload.session_id)
+    .execute(&state.db)
+    .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    // 6. Audit Log du succès
     let _ = write_audit_log(
-    &state, 
-    Some(user_id), 
-    Some(bindkey_id), 
-    "VERIFY_SUCCESS", 
-    Some(format!("Session {} verified", payload.session_id)), 
-    AuditSeverity::INFO
-).await;
+        &state, 
+        Some(user_id), 
+        Some(bindkey_id), 
+        "VERIFY_SUCCESS", 
+        Some(format!("Session {} verified", payload.session_id)), 
+        AuditSeverity::INFO
+    ).await;
 
     Ok(Json(VerifyResponse {
         server_token,
@@ -257,7 +224,6 @@ pub async fn verify_session(
         role: row.get("role"),
     }))
 }
-
 // ─────────────────────────────────────────────────────────────
 // POST /sessions/refresh
 // ─────────────────────────────────────────────────────────────
