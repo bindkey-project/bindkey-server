@@ -154,6 +154,9 @@ pub async fn verify_session(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
     .ok_or((StatusCode::UNAUTHORIZED, "Session invalide".into()))?;
+   
+    let user_id: Uuid = row.get("user_id");
+    let bindkey_id: Uuid = row.get("bindkey_id");
 
     let challenge: String = row.get("auth_challenge");
     let public_key_b64: String = row.get("public_key");
@@ -173,10 +176,7 @@ pub async fn verify_session(
         .map_err(|_| (StatusCode::BAD_REQUEST, "Taille signature incorrecte".into()))?;
     let signature = Signature::from_bytes(&sig_array);
 
-    // Logs Debug
-    println!("DEBUG: Challenge string: '{}'", challenge);
-    println!("DEBUG: Challenge bytes: {:?}", challenge.as_bytes());
-    println!("DEBUG: Signature bytes: {:?}", sig_array);
+   
 
     // Vérification cryptographique
     verifying_key.verify(challenge.as_bytes(), &signature)
@@ -193,6 +193,15 @@ pub async fn verify_session(
     .bind(&server_token).bind(&local_token).bind(expires_at).bind(payload.session_id)
     .execute(&state.db).await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let _ = write_audit_log(
+    &state, 
+    Some(user_id), 
+    Some(bindkey_id), 
+    "VERIFY_SUCCESS", 
+    Some(format!("Session {} verified", payload.session_id)), 
+    AuditSeverity::INFO
+).await;
 
     Ok(Json(VerifyResponse {
         server_token,

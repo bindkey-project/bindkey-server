@@ -36,7 +36,9 @@ pub async fn write_audit_log(
     details: Option<String>,
     severity: AuditSeverity,
 ) -> Result<(), sqlx::Error> {
+    eprintln!("🚀 AUDIT ATTEMPT: action={}, user={:?}", action, user_id);
     let id = Uuid::new_v4();
+
     let now = Utc::now();
 
     sqlx::query(
