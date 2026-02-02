@@ -55,10 +55,8 @@ pub async fn prepare_volume(
 
     let bindkey_id: Uuid = row.get("id");
     let owner_id: Uuid = row.get("user_id");
-    // En prod : on garde la vérif ownership
-    // En dev/test (skip-auth) : auth.user_id ne correspond pas forcément au user créé,
-    // donc on ne bloque pas.
-    if !cfg!(feature = "skip-auth") && owner_id != auth.user_id {
+
+    if owner_id != auth.user_id {
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
 

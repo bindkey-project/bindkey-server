@@ -87,6 +87,8 @@ pub async fn login_session(
         FROM users u
         JOIN bindkeys b ON b.user_id = u.id
         WHERE u.email = $1
+        ORDER BY b.created_at DESC
+    LIMIT 1
         "#,
     )
     .bind(&payload.email)
@@ -156,11 +158,11 @@ pub async fn verify_session(
     let row = sqlx::query(
         r#"
         SELECT s.user_id, s.bindkey_id, s.auth_challenge,
-               b.public_key, u.first_name, u.role
+               b.public_key, u.first_name, u.role::text AS role
         FROM sessions s
         JOIN users u ON u.id = s.user_id
         JOIN bindkeys b ON b.id = s.bindkey_id
-        WHERE s.id = $1 AND s.expires_at > NOW()
+        WHERE s.id = $1 AND s.expires_at > NOW()                   
         "#,
     )
     .bind(payload.session_id)
@@ -169,7 +171,12 @@ pub async fn verify_session(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
     .ok_or((StatusCode::UNAUTHORIZED, "Session invalide".into()))?;
 
-    let challenge: String = row.get("auth_challenge");
+    let challenge: Option<String> = row.get("auth_challenge");
+    let challenge = challenge.ok_or((
+        StatusCode::UNAUTHORIZED,
+        "Challenge manquant (session déjà vérifiée ou expirée)".into(),
+    ))?;
+
     let public_key_b64: String = row.get("public_key");
 
     // Décodage clé publique
