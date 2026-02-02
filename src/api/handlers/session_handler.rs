@@ -88,7 +88,7 @@ pub async fn login_session(
         JOIN bindkeys b ON b.user_id = u.id
         WHERE u.email = $1
         ORDER BY b.created_at DESC
-    LIMIT 1
+        LIMIT 1
         "#,
     )
     .bind(&payload.email)
@@ -171,12 +171,7 @@ pub async fn verify_session(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
     .ok_or((StatusCode::UNAUTHORIZED, "Session invalide".into()))?;
 
-    let challenge: Option<String> = row.get("auth_challenge");
-    let challenge = challenge.ok_or((
-        StatusCode::UNAUTHORIZED,
-        "Challenge manquant (session déjà vérifiée ou expirée)".into(),
-    ))?;
-
+    let challenge: String = row.get("auth_challenge");
     let public_key_b64: String = row.get("public_key");
 
     // Décodage clé publique
