@@ -49,21 +49,35 @@ async fn test_disk_lifecycle_full() {
     println!("Succès : Disque enregistré avec l'ID {}", disk_id);
 
     // --- 2. RÉCUPÉRATION PAR ID (GET /disks/:id) ---
+    // on fait le GET
     let res = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri(format!("/disks/{}", disk_id))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    .clone()
+    .oneshot(
+        Request::builder()
+            .method("GET")
+            .uri(format!("/disks/{}", disk_id))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await
+    .unwrap();
 
-    println!("\n--- ÉTAPE 2 : RÉCUPÉRATION PAR ID ---");
-    assert_eq!(res.status(), StatusCode::OK);
-    println!("Statut : 200 OK");
+    // récupérer status avant de consommer le body
+    let status = res.status();
+
+    // lire le body (ça consomme res)
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+    .await
+    .unwrap();
+    let body_str = String::from_utf8_lossy(&body);
+
+    println!("Statut : {} ({:?})", status.as_u16(), status.canonical_reason());
+    println!("Body : {}", body_str);
+
+    // puis assert
+    assert_eq!(status, StatusCode::OK);
+
+
 
     // --- 3. RECHERCHE PAR NUMÉRO DE SÉRIE (GET /disks?serial=...) ---
     let res = app

@@ -1,3 +1,5 @@
+use crate::api::handlers::user_handler::list_users;
+
 // ─────────────────────────────────────────────────────────────
 // user_routes_module.rs
 // Déclare toutes les routes /users et les associe aux handlers
@@ -24,4 +26,6 @@ pub fn user_routes() -> Router<crate::db::AppState> {
         .route("/users", get(get_user_by_email))
         // PATCH /users/:id/status : activer/désactiver
         .route("/users/:id/status", patch(update_user_status))
+        // GET /admin/users
+        .route("/admin/users", get(list_users))
 }

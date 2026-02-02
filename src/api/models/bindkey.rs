@@ -1,36 +1,59 @@
-// ─────────────────────────────────────────────────────────────
-// Struct Bindkey : représente une clé biométrique enregistrée
-// ─────────────────────────────────────────────────────────────
+// src/api/models/bindkey.rs
+// -----------------------------------------------------------------------------
+// Bindkey (API/DB model)
+//
+// Ce module contient la représentation Rust de la table SQL `bindkeys`.
+// Elle est utilisée par SQLx (FromRow) et peut être sérialisée en JSON (serde).
+//
+// Choix de nommage :
+// - Bindkey / BindkeyStatus sont conservés pour rester cohérents avec
+//   les handlers et le reste du projet.
+// - user_id : Option<Uuid> car la colonne peut être NULL en base.
+// -----------------------------------------------------------------------------
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize, FromRow)]
+/// Représentation d'une Bindkey enregistrée.
+///
+/// Correspond à une ligne de la table SQL `bindkeys`.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Bindkey {
+    /// Identifiant unique (clé primaire).
     pub id: Uuid,
 
-    // L’utilisateur auquel appartient la clé biométrique
-    pub user_id: Uuid,
+    /// Propriétaire de la Bindkey.
+    ///
+    /// Option<Uuid> si la colonne SQL `user_id` est nullable.
+    pub user_id: Option<Uuid>,
 
-    // Identifiant unique interne du périphérique (USB/BIO)
+    /// Identifiant unique interne du périphérique (USB/BIO).
     pub bindkey_uid: String,
 
-    // Empreinte biométrique (hashée)
+    /// Empreinte biométrique (template/hash).
+    ///
+    /// ⚠️ Si ta colonne SQL s’appelle `fingerprint_hash` et pas
+    /// `fingerprint_template`, ajoute :
+    /// `#[sqlx(rename = "fingerprint_hash")]`
     pub fingerprint_template: String,
 
-    // Clé publique pour déchiffrement et signature
+    /// Clé publique associée (signature / chiffrement).
     pub public_key: String,
 
-    // Statut de la BindKey (ACTIVE, RESET, LOST, BROKEN)
+    /// Statut de la Bindkey (ENUM SQL `bindkey_status`).
     pub status: BindkeyStatus,
 
+    /// Date de création.
     pub created_at: DateTime<Utc>,
 }
 
-/// Enum SQL : bindkey_status
-#[derive(Debug, Serialize, Deserialize, sqlx::Type)]
+/// Enum SQL : `bindkey_status`
+///
+/// `rename_all = "UPPERCASE"` aligne les variantes avec les valeurs en base
+/// (ACTIVE, RESET, LOST, BROKEN).
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "bindkey_status", rename_all = "UPPERCASE")]
 pub enum BindkeyStatus {
     ACTIVE,

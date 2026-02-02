@@ -242,3 +242,55 @@ pub async fn update_user_status(
 
     Ok(StatusCode::NO_CONTENT)
 }
+
+//
+// ─────────────────────────────────────────────────────────────
+// GET /admin/users (accessible ADMIN uniquement)
+// ─────────────────────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+pub struct ListUsersQuery {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+// Réponse "safe" pour l'UI (pas de password_hash, pas de recovery_code_hash, etc.)
+#[derive(serde::Serialize, sqlx::FromRow)]
+pub struct UserListItem {
+    pub id: Uuid,
+    pub first_name: String,
+    pub last_name: String,
+    pub email: String,
+    pub role: String,   // si en DB c'est TEXT/ENUM, String marche
+    pub status: String, // idem
+}
+
+pub async fn list_users(
+    Extension(auth): Extension<AuthUser>,
+    State(state): State<AppState>,
+    Query(q): Query<ListUsersQuery>,
+) -> Result<Json<Vec<UserListItem>>, (StatusCode, String)> {
+    // ✅ Admin only
+    if !require_role(&auth.role, &UserRole::ADMIN) {
+        return Err((StatusCode::FORBIDDEN, "ADMIN required".into()));
+    }
+
+    let limit = q.limit.unwrap_or(50).clamp(1, 200);
+    let offset = q.offset.unwrap_or(0).max(0);
+
+    let users = sqlx::query_as::<_, UserListItem>(
+        r#"
+        SELECT id, first_name, last_name, email, role::text as role, status::text as status
+        FROM users
+        ORDER BY created_at DESC
+        LIMIT $1 OFFSET $2
+        "#,
+    )
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
+
+    Ok(Json(users))
+}

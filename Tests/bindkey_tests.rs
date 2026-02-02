@@ -266,22 +266,21 @@ async fn test_get_user_bindkeys_list_content() {
     assert_eq!(list[0]["bindkey_uid"], bindkey_uid);
 }
 
-
 /*async fn setup_test_user_with_key(pool: &sqlx::PgPool, email: &str, public_key_b64: &str) {
     // 1. Configuration de l'environnement de sécurité (AES)
     unsafe {
         std::env::set_var("PWD_ENCRYPTION_KEY", "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
     }
-    
+
     let key_hex = std::env::var("PWD_ENCRYPTION_KEY").unwrap();
     let key_bytes = hex::decode(&key_hex).expect("Clé AES invalide");
     let key = aes_gcm::Key::<Aes256Gcm>::from_slice(&key_bytes);
     let cipher = Aes256Gcm::new(key);
-    let nonce = Nonce::from_slice(b"unique_nonce"); 
+    let nonce = Nonce::from_slice(b"unique_nonce");
 
     // 2. Génération d'un hash Argon2 valide pour "password123"
     // On utilise un sel statique pour éviter les conflits entre rand 0.8 et 0.9
-    let salt = SaltString::from_b64("c29tZXN0YXRpY19zYWx0").unwrap(); 
+    let salt = SaltString::from_b64("c29tZXN0YXRpY19zYWx0").unwrap();
     let argon2 = Argon2::default();
     let argon2_hash = argon2
         .hash_password("password123".as_bytes(), &salt)
@@ -292,18 +291,18 @@ async fn test_get_user_bindkeys_list_content() {
     let encrypted_bytes = cipher
         .encrypt(nonce, argon2_hash.as_bytes())
         .expect("Chiffrement de test échoué");
-    
+
     let encrypted_b64 = general_purpose::STANDARD.encode(encrypted_bytes);
 
     // 4. Insertion ou mise à jour de l'utilisateur
     let row = sqlx::query(
         r#"
         INSERT INTO users (
-            id, first_name, last_name, email, role, status, 
+            id, first_name, last_name, email, role, status,
             password_hash, recovery_code_hash, created_at, updated_at
-        ) 
-        VALUES ($1, $2, $3, $4, $5::user_role, $6::user_status, $7, $8, NOW(), NOW()) 
-        ON CONFLICT (email) DO UPDATE SET 
+        )
+        VALUES ($1, $2, $3, $4, $5::user_role, $6::user_status, $7, $8, NOW(), NOW())
+        ON CONFLICT (email) DO UPDATE SET
             password_hash = EXCLUDED.password_hash,
             recovery_code_hash = EXCLUDED.recovery_code_hash,
             status = EXCLUDED.status
@@ -336,7 +335,7 @@ async fn test_get_user_bindkeys_list_content() {
         r#"
         INSERT INTO bindkeys (
             id, user_id, bindkey_uid, fingerprint_template, public_key, status
-        ) 
+        )
         VALUES ($1, $2, $3, $4, $5, $6::bindkey_status)
         "#
     )
@@ -354,7 +353,7 @@ async fn test_get_user_bindkeys_list_content() {
 /*async fn test_full_authentication_flow() {
     // 1. Initialisation du serveur de test (In-Memory)
     // On récupère ton Router via create_app_instance
-    let app = create_app_instance().await; 
+    let app = create_app_instance().await;
     let server = TestServer::new(app).expect("Failed to create test server");
 
     // 2. Connexion à la BDD pour préparer les données
@@ -363,7 +362,7 @@ async fn test_get_user_bindkeys_list_content() {
     let pool = sqlx::PgPool::connect(&database_url).await.unwrap();
 
     // 3. Préparation des clés ECC (Simulation BindKey)
-    let signing_key = SigningKey::from_bytes(&[0u8; 32]); 
+    let signing_key = SigningKey::from_bytes(&[0u8; 32]);
     let public_key_bytes = signing_key.verifying_key().to_bytes();
     let public_key_b64 = general_purpose::STANDARD.encode(public_key_bytes);
 
@@ -373,7 +372,7 @@ async fn test_get_user_bindkeys_list_content() {
     // 4. ÉTAPE LOGIN : Appel via le serveur de test
     let login_payload = json!({
         "email": test_email,
-        "password_hash": "password123" 
+        "password_hash": "password123"
     });
 
     let res_login = server.post("/sessions/login")
@@ -382,7 +381,7 @@ async fn test_get_user_bindkeys_list_content() {
 
     res_login.assert_status_ok();
     let login_data: LoginResponse = res_login.json();
-    
+
     // 5. ÉTAPE SIGNATURE (Logique locale au test)
     let signature = signing_key.sign(login_data.auth_challenge.as_bytes());
     let signature_b64 = general_purpose::STANDARD.encode(signature.to_bytes());
@@ -400,10 +399,10 @@ async fn test_get_user_bindkeys_list_content() {
     // 7. ASSERTIONS FINALES
     res_verify.assert_status_ok();
     let final_data: VerifyResponse = res_verify.json();
-    
+
     assert!(!final_data.server_token.is_empty(), "Le server_token ne doit pas être vide");
     assert_eq!(final_data.role, "USER");
-    
+
     println!("✅ Flow d'authentification validé en mémoire pour : {}", final_data.first_name);
 }*/
 
@@ -421,4 +420,4 @@ async fn generate_real_admin_hash() {
     let final_db_string = chiffrer_aes(&argon_hash);
 
     println!("\n\n🚀 VALEUR À COPIER EN BDD (password_hash) :\n{}\n", final_db_string);
-}*/
+}

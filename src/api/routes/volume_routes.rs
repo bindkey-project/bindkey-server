@@ -12,7 +12,8 @@ use crate::api::handlers::volume_handler::{
     delete_volume,     // DELETE /volumes/:id
     get_volume,        // GET    /volumes/:id
     list_user_volumes, // GET    /users/:id/volumes
-    update_volume,     // PATCH  /volumes/:id
+    prepare_volume,
+    update_volume, // PATCH  /volumes/:id
 };
 
 //
@@ -30,6 +31,7 @@ use crate::api::handlers::volume_handler::{
 
 pub fn volume_routes() -> Router<crate::db::AppState> {
     Router::new()
+        .route("/volumes/prepare", post(prepare_volume))
         // ─────────────────────────────────────────
         // POST /volumes
         // Création d’un nouveau volume chiffré

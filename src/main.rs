@@ -11,6 +11,7 @@ use rcgen::generate_simple_self_signed;
 
 #[tokio::main]
 async fn main() {
+    dotenvy::dotenv().ok(); // pour la clé publique du test
     // Initialisation du provider TLS (important !)
     rustls::crypto::aws_lc_rs::default_provider()
         .install_default()

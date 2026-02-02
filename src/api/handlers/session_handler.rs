@@ -2,6 +2,9 @@
 // Session Handler
 // ─────────────────────────────────────────────────────────────
 
+use crate::api::audit::{AuditSeverity, write_audit_log};
+use crate::api::middleware;
+use crate::db::AppState;
 use axum::{Json, extract::State, http::StatusCode};
 use chrono::{Duration, Utc};
 use uuid::Uuid;
@@ -12,6 +15,8 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use std::convert::TryInto;
 use rand::{Rng, distr::Alphanumeric, rng};
 use sqlx::Row;
+use std::convert::TryInto;
+use uuid::Uuid;
 use crate::api::audit::{AuditSeverity, write_audit_log};
 
 // ─────────────────────────────────────────────────────────────
@@ -87,6 +92,8 @@ pub async fn login_session(
         FROM users u
         JOIN bindkeys b ON b.user_id = u.id
         WHERE u.email = $1
+        ORDER BY b.created_at DESC
+        LIMIT 1
         "#,
     )
     .bind(&payload.email)
@@ -142,11 +149,11 @@ pub async fn verify_session(
     let row = sqlx::query(
         r#"
         SELECT s.user_id, s.bindkey_id, s.auth_challenge,
-               b.public_key, u.first_name, u.role
+               b.public_key, u.first_name, u.role::text AS role
         FROM sessions s
         JOIN users u ON u.id = s.user_id
         JOIN bindkeys b ON b.id = s.bindkey_id
-        WHERE s.id = $1 AND s.expires_at > NOW()
+        WHERE s.id = $1 AND s.expires_at > NOW()                   
         "#,
     )
     .bind(payload.session_id)
@@ -174,14 +181,51 @@ pub async fn verify_session(
         .map_err(|_| (StatusCode::BAD_REQUEST, "Signature Base64 invalide".into()))?;
     let sig_array: [u8; 64] = sig_bytes.try_into()
         .map_err(|_| (StatusCode::BAD_REQUEST, "Taille signature incorrecte".into()))?;
+    let pub_key_bytes = general_purpose::STANDARD
+        .decode(&public_key_b64)
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Clé publique invalide".into(),
+            )
+        })?;
+    let pub_key_array: [u8; 32] = pub_key_bytes.try_into().map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Taille clé publique incorrecte".into(),
+        )
+    })?;
+    let verifying_key = VerifyingKey::from_bytes(&pub_key_array).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Format clé Ed25519 invalide".into(),
+        )
+    })?;
+
+    // Décodage signature
+    let sig_bytes = general_purpose::STANDARD
+        .decode(&payload.signature)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Signature Base64 invalide".into()))?;
+    let sig_array: [u8; 64] = sig_bytes.try_into().map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Taille signature incorrecte".into(),
+        )
+    })?;
     let signature = Signature::from_bytes(&sig_array);
 
    
+
+    // Logs Debug
+    println!("DEBUG: Challenge string: '{}'", challenge);
+    println!("DEBUG: Challenge bytes: {:?}", challenge.as_bytes());
+    println!("DEBUG: Signature bytes: {:?}", sig_array);
 
     // Vérification cryptographique
     verifying_key.verify(challenge.as_bytes(), &signature)
         .map_err(|_| (StatusCode::UNAUTHORIZED, "Signature invalide".into()))?;
 
+    // Génération des tokens
     // Génération des tokens
     let server_token = random_string(64);
     let local_token = random_string(64);
@@ -189,7 +233,10 @@ pub async fn verify_session(
 
     sqlx::query(
         "UPDATE sessions SET server_token=$1, local_token=$2, auth_challenge=NULL, expires_at=$3 WHERE id=$4"
+        "UPDATE sessions SET server_token=$1, local_token=$2, auth_challenge=NULL, expires_at=$3 WHERE id=$4"
     )
+    .bind(&server_token).bind(&local_token).bind(expires_at).bind(payload.session_id)
+    .execute(&state.db).await
     .bind(&server_token).bind(&local_token).bind(expires_at).bind(payload.session_id)
     .execute(&state.db).await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
