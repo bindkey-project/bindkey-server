@@ -77,12 +77,17 @@ spec:
     metadata:
       labels:
         app: bindkey-api
+      annotations:
+        # Cette ligne permet de forcer le restart via kubectl rollout restart
+        # sans avoir à changer manuellement le SHA à chaque fois
+        kubectl.kubernetes.io/restartedAt: "" 
     spec:
       imagePullSecrets:
         - name: ghcr-auth
       containers:
         - name: bindkey-api
-          image: ghcr.io/bindkey-project/bindkey-server/bindkey-server:v1.0.1
+          # Utilisation du tag latest pour automatiser les futurs pushs
+          image: ghcr.io/bindkey-project/bindkey-server/bindkey-server:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
