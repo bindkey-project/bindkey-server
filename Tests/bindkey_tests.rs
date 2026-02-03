@@ -1,3 +1,6 @@
+use sqlx::PgPool;
+use dotenvy;
+
 use axum::body as ax_body;
 use axum::{
     body::Body,
@@ -9,6 +12,48 @@ use uuid::Uuid;
 
 use bindkey_server::create_app_instance;
 
+// -----------------------------------------------------------------------------
+// Helper TEST : crée un user "acteur" utilisé par l'auth de test (Uuid::nil())
+// Sinon l'audit échoue car audit_logs.user_id a une FK vers users(id).
+// -----------------------------------------------------------------------------
+async fn ensure_test_actor_user_exists() {
+    dotenvy::dotenv().ok();
+
+    let database_url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set for tests");
+
+    let pool = PgPool::connect(&database_url)
+        .await
+        .expect("DB connect failed");
+
+    let nil = Uuid::nil();
+
+    // ⚠️ Ici on ne met PAS password_hash (si ta colonne est nullable).
+    // Dans ta table users que tu as montrée, password_hash n'existe même pas,
+    // donc cette requête correspond bien à ton schema actuel.
+    sqlx::query(
+        r#"
+        INSERT INTO users (
+            id, first_name, last_name, email,
+            role, status,
+            recovery_code_hash,
+            created_at, updated_at
+        )
+        VALUES (
+            $1, 'Test', 'Actor', 'test_actor@bindkey.io',
+            'ENROLLER', 'ACTIVE',
+            'dummy_recovery_hash',
+            now(), now()
+        )
+        ON CONFLICT (email) DO NOTHING
+        "#
+    )
+    .bind(nil)
+    .execute(&pool)
+    .await
+    .expect("Failed to insert test actor user");
+}
+
 // ─────────────────────────────────────────────────────────────
 // Test 1 : flow enrollement + doublon
 // ─────────────────────────────────────────────────────────────use bindkey_server::api::middleware::hasher_mot_de_passe;
@@ -16,6 +61,7 @@ use bindkey_server::api::middleware::chiffrer_aes;
 
 #[tokio::test]
 async fn test_full_security_and_enrollment_flow() {
+    ensure_test_actor_user_exists().await; // ✅ AJOUT
     let app = create_app_instance().await;
 
     // ÉTAPE 1 : CRÉATION DE L'UTILISATEUR
@@ -119,6 +165,7 @@ async fn test_full_security_and_enrollment_flow() {
 // ─────────────────────────────────────────────────────────────
 #[tokio::test]
 async fn test_get_user_bindkeys_list() {
+    ensure_test_actor_user_exists().await; // ✅ AJOUT
     let app = create_app_instance().await;
 
     let user_email = format!("test_list_{}@bindkey.io", Uuid::new_v4());
@@ -168,6 +215,7 @@ async fn test_get_user_bindkeys_list() {
 // ─────────────────────────────────────────────────────────────
 #[tokio::test]
 async fn test_get_bindkey_not_found() {
+    ensure_test_actor_user_exists().await; // ✅ AJOUT
     let app = create_app_instance().await;
     let fake_id = Uuid::new_v4();
 

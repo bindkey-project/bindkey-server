@@ -1,5 +1,22 @@
+// src/api/handlers/user_handler.rs
+//
+// Objectif de cette version :
+// Écrire les logs d’audit EN BASE (table audit_logs)
+// Ne jamais cacher les erreurs d’audit : pas de `let _ = ...await;`
+// Fix "move" pour payload.status (UserStatus n’est pas forcément Copy)
+//
+// Audits existants :
+// - USER_CREATE
+// - USER_PASSWORD_SET
+// - USER_ENABLE / USER_DISABLE
+//
+// Note sécurité :
+// - Ne jamais logger le mot de passe en clair
+// - On peut logger l’email (si c’est acceptable dans ton contexte)
+
 use axum::{
-    Extension, Json,
+    Extension,
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
 };
@@ -34,7 +51,7 @@ pub struct CreateUserRequest {
     pub first_name: String,
     pub last_name: String,
     pub email: String,
-    pub password: Option<String>, // password EN CLAIR
+    pub password: Option<String>, // password EN CLAIR (ne jamais logger)
 }
 
 #[derive(serde::Serialize)]
@@ -49,14 +66,14 @@ pub async fn create_user(
     State(state): State<AppState>,
     Json(payload): Json<CreateUserRequest>,
 ) -> Result<Json<CreateUserResponse>, (StatusCode, String)> {
-    // RBAC
+    // 1) RBAC
     if !require_role(&auth.role, &UserRole::ENROLLER) {
         return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
     }
 
+    // 2) IDs + recovery code
     let user_id = Uuid::new_v4();
 
-    // ── Recovery code (random + hash)
     let mut raw = [0u8; 16];
     OsRng.fill_bytes(&mut raw);
     let recovery_code = URL_SAFE_NO_PAD.encode(raw);
@@ -69,7 +86,7 @@ pub async fn create_user(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .to_string();
 
-    // ── Password (optionnel)
+    // 3) Password (optionnel) -> hash argon2 puis chiffrement AES
     let password_hash_encrypted: Option<String> = if let Some(password) = &payload.password {
         let argon2_hash = middleware::hachage_argon2::hasher_mot_de_passe(password);
         Some(middleware::aes_chiffrement::chiffrer_aes(&argon2_hash))
@@ -77,7 +94,7 @@ pub async fn create_user(
         None
     };
 
-    // ── INSERT user
+    // 4) INSERT user
     sqlx::query(
         r#"
         INSERT INTO users (
@@ -104,19 +121,24 @@ pub async fn create_user(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
 
-    // ── Audit
-    let _ = write_audit_log(
+    // 5) Audit : USER_CREATE (ne pas cacher l'erreur)
+    if let Err(e) = write_audit_log(
         &state,
-        Some(auth.user_id),
+        Some(auth.user_id), // qui a créé l’utilisateur (enroller/admin)
         None,
         "USER_CREATE",
         Some(format!("created_user_id={user_id} email={}", payload.email)),
         AuditSeverity::INFO,
     )
-    .await;
+    .await
+    {
+        eprintln!("❌ AUDIT LOG FAILED (USER_CREATE): {e}");
+    }
 
+    // 6) Audit : USER_PASSWORD_SET (si password fourni)
+    // (on loggue uniquement le fait qu’un password a été défini, pas sa valeur)
     if payload.password.is_some() {
-        let _ = write_audit_log(
+        if let Err(e) = write_audit_log(
             &state,
             Some(auth.user_id),
             None,
@@ -124,7 +146,10 @@ pub async fn create_user(
             Some(format!("user_id={user_id}")),
             AuditSeverity::INFO,
         )
-        .await;
+        .await
+        {
+            eprintln!("❌ AUDIT LOG FAILED (USER_PASSWORD_SET): {e}");
+        }
     }
 
     Ok(Json(CreateUserResponse {
@@ -204,9 +229,13 @@ pub async fn update_user_status(
     Path(user_id): Path<Uuid>,
     Json(payload): Json<UpdateUserStatusRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    // RBAC
     if !require_role(&auth.role, &UserRole::ENROLLER) {
         return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
     }
+
+    // Fix move : UserStatus peut ne pas être Copy => on clone avant bind
+    let new_status = payload.status.clone();
 
     let res = sqlx::query(
         r#"
@@ -215,7 +244,7 @@ pub async fn update_user_status(
         WHERE id = $2
         "#,
     )
-    .bind(payload.status)
+    .bind(new_status.clone()) // SQLx consomme -> clone
     .bind(user_id)
     .execute(&state.db)
     .await
@@ -225,20 +254,25 @@ pub async fn update_user_status(
         return Err((StatusCode::NOT_FOUND, "User not found".into()));
     }
 
-    let action = match payload.status {
+    // Déterminer l’action audit
+    let action = match new_status {
         UserStatus::ACTIVE => "USER_ENABLE",
         UserStatus::DISABLED => "USER_DISABLE",
     };
 
-    let _ = write_audit_log(
+    // Audit après succès (ne pas cacher l’erreur)
+    if let Err(e) = write_audit_log(
         &state,
         Some(auth.user_id),
         None,
         action,
-        Some(format!("target_user_id={user_id}")),
+        Some(format!("target_user_id={user_id} new_status={new_status:?}")),
         AuditSeverity::WARNING,
     )
-    .await;
+    .await
+    {
+        eprintln!("❌ AUDIT LOG FAILED ({action}): {e}");
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -254,15 +288,14 @@ pub struct ListUsersQuery {
     pub offset: Option<i64>,
 }
 
-// Réponse "safe" pour l'UI (pas de password_hash, pas de recovery_code_hash, etc.)
 #[derive(serde::Serialize, sqlx::FromRow)]
 pub struct UserListItem {
     pub id: Uuid,
     pub first_name: String,
     pub last_name: String,
     pub email: String,
-    pub role: String,   // si en DB c'est TEXT/ENUM, String marche
-    pub status: String, // idem
+    pub role: String,
+    pub status: String,
 }
 
 pub async fn list_users(
@@ -270,7 +303,7 @@ pub async fn list_users(
     State(state): State<AppState>,
     Query(q): Query<ListUsersQuery>,
 ) -> Result<Json<Vec<UserListItem>>, (StatusCode, String)> {
-    // ✅ Admin only
+    // Admin only
     if !require_role(&auth.role, &UserRole::ADMIN) {
         return Err((StatusCode::FORBIDDEN, "ADMIN required".into()));
     }

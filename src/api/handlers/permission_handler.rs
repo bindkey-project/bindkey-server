@@ -5,13 +5,22 @@
 //   - GET    /volumes/:id/permissions
 //   - DELETE /permissions/:id
 //
-// Audit :
+// Audit (table audit_logs) :
 //   - VOLUME_PERMISSION_GRANT
 //   - VOLUME_PERMISSION_REVOKE
 //   - VOLUME_PERMISSION_FORBIDDEN (tentatives non autorisées)
+//
+// Modif principale :
+//    -> remplacer tous les `let _ = write_audit_log(...).await;`
+//       par `if let Err(e) = write_audit_log(...).await { eprintln!(...) }`
+//
+// Pourquoi ?
+// - `let _ = ...` cache les erreurs : si l'INSERT audit échoue, tu ne le sais pas.
+// - Avec `if let Err(e)`, tu verras l’erreur SQL dans les logs serveur.
 
 use axum::{
-    Extension, Json,
+    Extension,
+    Json,
     extract::{Path, State},
     http::StatusCode,
 };
@@ -59,9 +68,10 @@ pub async fn share_volume(
     let is_owner = owner_id == auth.user_id;
     let is_admin = require_role(&auth.role, &UserRole::ADMIN);
 
+    // Si pas owner/admin => interdit
     if !is_owner && !is_admin {
-        // Audit tentative interdite
-        let _ = write_audit_log(
+        // Audit tentative interdite (et on n’ignore pas l’erreur)
+        if let Err(e) = write_audit_log(
             &state,
             Some(auth.user_id),
             None,
@@ -72,7 +82,10 @@ pub async fn share_volume(
             )),
             AuditSeverity::WARNING,
         )
-        .await;
+        .await
+        {
+            eprintln!("❌ AUDIT LOG FAILED (VOLUME_PERMISSION_FORBIDDEN share): {e}");
+        }
 
         return Err((
             StatusCode::FORBIDDEN,
@@ -80,12 +93,12 @@ pub async fn share_volume(
         ));
     }
 
-    // 3) Préparer les valeurs (anti move + logs)
+    // 3) Préparer les valeurs (anti-move + log)
     // PermissionLevel n’est pas Copy -> on prépare le texte de log AVANT bind()
     let grantee_id = payload.grantee_id;
     let expires_at = payload.expires_at;
 
-    // ✅ On convertit permission en String pour pouvoir loguer sans “move”
+    // On convertit permission en String pour pouvoir le loguer sans move
     let permission_str = format!("{:?}", payload.permission);
 
     // 4) Insert permission
@@ -100,7 +113,7 @@ pub async fn share_volume(
     .bind(perm_id)
     .bind(volume_id)
     .bind(grantee_id)
-    .bind(payload.permission) // <-- move ici, OK car on ne l’utilise plus après
+    .bind(payload.permission) // move OK : on ne l’utilise plus après
     .bind(expires_at)
     .bind(auth.user_id)
     .execute(&state.db)
@@ -108,7 +121,7 @@ pub async fn share_volume(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
 
     // 5) Audit après INSERT OK
-    let _ = write_audit_log(
+    if let Err(e) = write_audit_log(
         &state,
         Some(auth.user_id),
         None,
@@ -118,7 +131,10 @@ pub async fn share_volume(
         )),
         AuditSeverity::INFO,
     )
-    .await;
+    .await
+    {
+        eprintln!("❌ AUDIT LOG FAILED (VOLUME_PERMISSION_GRANT): {e}");
+    }
 
     Ok(Json(ShareVolumeResponse {
         permission_id: perm_id,
@@ -147,8 +163,8 @@ pub async fn list_volume_permissions(
     let is_admin = require_role(&auth.role, &UserRole::ADMIN);
 
     if !is_owner && !is_admin {
-        // Audit tentative interdite
-        let _ = write_audit_log(
+        // Audit tentative interdite (et on n’ignore pas l’erreur)
+        if let Err(e) = write_audit_log(
             &state,
             Some(auth.user_id),
             None,
@@ -156,7 +172,10 @@ pub async fn list_volume_permissions(
             Some(format!("list permissions denied volume_id={volume_id}")),
             AuditSeverity::WARNING,
         )
-        .await;
+        .await
+        {
+            eprintln!("❌ AUDIT LOG FAILED (VOLUME_PERMISSION_FORBIDDEN list): {e}");
+        }
 
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
@@ -183,7 +202,7 @@ pub async fn revoke_permission(
     State(state): State<AppState>,
     Path(permission_id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    // 1) Retrouver volume_id (et grantee_id si tu veux le mettre dans le log)
+    // 1) Retrouver volume_id (et grantee_id)
     let row = sqlx::query_as::<_, (Uuid, Uuid)>(
         r#"
         SELECT volume_id, grantee_id
@@ -212,7 +231,8 @@ pub async fn revoke_permission(
     let is_admin = require_role(&auth.role, &UserRole::ADMIN);
 
     if !is_owner && !is_admin {
-        let _ = write_audit_log(
+        // Audit tentative interdite (et on n’ignore pas l’erreur)
+        if let Err(e) = write_audit_log(
             &state,
             Some(auth.user_id),
             None,
@@ -222,7 +242,10 @@ pub async fn revoke_permission(
             )),
             AuditSeverity::WARNING,
         )
-        .await;
+        .await
+        {
+            eprintln!("❌ AUDIT LOG FAILED (VOLUME_PERMISSION_FORBIDDEN revoke): {e}");
+        }
 
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
@@ -235,7 +258,7 @@ pub async fn revoke_permission(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
 
     // 5) Audit après DELETE OK
-    let _ = write_audit_log(
+    if let Err(e) = write_audit_log(
         &state,
         Some(auth.user_id),
         None,
@@ -245,7 +268,10 @@ pub async fn revoke_permission(
         )),
         AuditSeverity::WARNING,
     )
-    .await;
+    .await
+    {
+        eprintln!("❌ AUDIT LOG FAILED (VOLUME_PERMISSION_REVOKE): {e}");
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }

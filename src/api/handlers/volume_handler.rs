@@ -7,27 +7,37 @@
 //   - PATCH  /volumes/:id
 //   - DELETE /volumes/:id
 //
-// Audit :
+// Audit (table audit_logs) :
 //   - VOLUME_CREATE
 //   - VOLUME_UPDATE
 //   - VOLUME_DELETE
 //   - VOLUME_FORBIDDEN (tentatives non autorisées)
 //
-// Note sécurité : ne JAMAIS logger encrypted_key (clé chiffrée).
+// Modif principale pour être sûre que les logs s’écrivent en DB :
+//   -> supprimer les `.await.ok()` qui masquent les erreurs
+//   -> remplacer par `if let Err(e) = write_audit_log(...).await { eprintln!(...) }`
+//
+// ⚠️ Note sécurité : ne JAMAIS logger `encrypted_key` (clé chiffrée).
 
 use axum::{
-    Extension, Json,
     extract::{Path, State},
     http::StatusCode,
+    Extension,
+    Json,
 };
-use sqlx::Row;
-use uuid::Uuid; //pour volume prepare
 
-use crate::api::audit::{AuditSeverity, write_audit_log};
+use uuid::Uuid;
+use sqlx::Row; // pour prepare_volume
+
 use crate::api::auth::{AuthUser, require_role};
+use crate::api::audit::{write_audit_log, AuditSeverity};
 use crate::api::models::user::UserRole;
 use crate::api::models::volume::Volume;
 use crate::db::AppState;
+
+// ─────────────────────────────────────────────────────────────
+// PREPARE /volumes (préparer un ID côté client)
+// ─────────────────────────────────────────────────────────────
 
 #[derive(serde::Deserialize)]
 pub struct PrepareVolumeRequest {
@@ -45,8 +55,7 @@ pub async fn prepare_volume(
     State(state): State<AppState>,
     Json(payload): Json<PrepareVolumeRequest>,
 ) -> Result<Json<PrepareVolumeResponse>, (StatusCode, String)> {
-    // 1) retrouver la bindkey via la public_key + vérifier ownership
-    // (on récupère id + user_id en une seule requête)
+    // 1) Retrouver la bindkey via la public_key + vérifier ownership
     let row = sqlx::query("SELECT id, user_id FROM bindkeys WHERE public_key = $1")
         .bind(&payload.public_key)
         .fetch_one(&state.db)
@@ -57,24 +66,38 @@ pub async fn prepare_volume(
     let owner_id: Uuid = row.get("user_id");
 
     if owner_id != auth.user_id {
+        // (Optionnel) audit forbidden ici aussi si tu veux tracer les tentatives
+        if let Err(e) = write_audit_log(
+            &state,
+            Some(auth.user_id),
+            Some(bindkey_id),
+            "VOLUME_FORBIDDEN",
+            Some("prepare denied: bindkey ownership mismatch".into()),
+            AuditSeverity::WARNING,
+        )
+        .await
+        {
+            eprintln!("❌ AUDIT LOG FAILED (VOLUME_FORBIDDEN prepare): {e}");
+        }
+
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
 
-    // 2) check volume existant lié à cette bindkey
-    if let Some(existing_id) =
-        sqlx::query_scalar::<_, Uuid>("SELECT id FROM volumes WHERE bindkey_id = $1 LIMIT 1")
-            .bind(bindkey_id)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?
-    {
+    // 2) Vérifier si un volume existe déjà pour cette bindkey
+    if let Some(existing_id) = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM volumes WHERE bindkey_id = $1 LIMIT 1"
+    )
+    .bind(bindkey_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))? {
         return Ok(Json(PrepareVolumeResponse {
             exists: true,
             volume_id: existing_id,
         }));
     }
 
-    // On renvoie un UUID au client
+    // 3) Sinon, renvoyer un UUID au client (préparation)
     Ok(Json(PrepareVolumeResponse {
         exists: false,
         volume_id: Uuid::new_v4(),
@@ -91,7 +114,7 @@ pub struct CreateVolumeRequest {
     pub disk_id: Uuid,
     pub name: String,
     pub size_bytes: i64,
-    pub encrypted_key: String,
+    pub encrypted_key: String, // ⚠️ ne jamais logger
 }
 
 #[derive(serde::Serialize)]
@@ -105,14 +128,14 @@ pub async fn create_volume(
     State(state): State<AppState>,
     Json(payload): Json<CreateVolumeRequest>,
 ) -> Result<Json<CreateVolumeResponse>, (StatusCode, String)> {
-    // 1 user = 1 bindkey : retrouver bindkey_id
+    // 1) user = 1 bindkey : retrouver bindkey_id
     let bindkey_id: Uuid = sqlx::query_scalar("SELECT id FROM bindkeys WHERE user_id = $1")
         .bind(auth.user_id)
         .fetch_one(&state.db)
         .await
         .map_err(|_| (StatusCode::NOT_FOUND, "BindKey not found for user".into()))?;
 
-    // INSERT
+    // 2) INSERT volume
     sqlx::query(
         r#"
         INSERT INTO volumes (id, owner_id, bindkey_id, disk_id, name, size_bytes, encrypted_key)
@@ -125,22 +148,24 @@ pub async fn create_volume(
     .bind(payload.disk_id)
     .bind(&payload.name)
     .bind(payload.size_bytes)
-    .bind(&payload.encrypted_key)
+    .bind(&payload.encrypted_key) // ⚠️ jamais loguer cette valeur
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
 
-    // Audit après succès
-    write_audit_log(
+    // 3) Audit après succès (ne pas cacher l’erreur)
+    if let Err(e) = write_audit_log(
         &state,
         Some(auth.user_id),
         None,
         "VOLUME_CREATE",
-        Some(format!("volume_id={}", payload.volume_id)),
+        Some(format!("volume_id={} disk_id={} name={}", payload.volume_id, payload.disk_id, payload.name)),
         AuditSeverity::INFO,
     )
     .await
-    .ok();
+    {
+        eprintln!("❌ AUDIT LOG FAILED (VOLUME_CREATE): {e}");
+    }
 
     Ok(Json(CreateVolumeResponse {
         volume_id: payload.volume_id,
@@ -167,8 +192,8 @@ pub async fn get_volume(
     let is_admin = require_role(&auth.role, &UserRole::ADMIN);
 
     if !is_owner && !is_admin {
-        // ✅ Audit tentative interdite
-        write_audit_log(
+        // Audit tentative interdite (ne pas cacher l’erreur)
+        if let Err(e) = write_audit_log(
             &state,
             Some(auth.user_id),
             None,
@@ -177,7 +202,9 @@ pub async fn get_volume(
             AuditSeverity::WARNING,
         )
         .await
-        .ok();
+        {
+            eprintln!("❌ AUDIT LOG FAILED (VOLUME_FORBIDDEN get): {e}");
+        }
 
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
@@ -198,8 +225,8 @@ pub async fn list_user_volumes(
     let is_admin = require_role(&auth.role, &UserRole::ADMIN);
 
     if !is_self && !is_admin {
-        // ✅ Audit tentative interdite
-        write_audit_log(
+        // Audit tentative interdite (ne pas cacher l’erreur)
+        if let Err(e) = write_audit_log(
             &state,
             Some(auth.user_id),
             None,
@@ -208,7 +235,9 @@ pub async fn list_user_volumes(
             AuditSeverity::WARNING,
         )
         .await
-        .ok();
+        {
+            eprintln!("❌ AUDIT LOG FAILED (VOLUME_FORBIDDEN list): {e}");
+        }
 
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
@@ -240,7 +269,7 @@ pub async fn update_volume(
     Path(id): Path<Uuid>,
     Json(payload): Json<UpdateVolumeRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    // Vérif owner/admin (et récupérer owner_id)
+    // 1) Vérif owner/admin
     let owner_id: Uuid = sqlx::query_scalar("SELECT owner_id FROM volumes WHERE id = $1")
         .bind(id)
         .fetch_one(&state.db)
@@ -251,7 +280,7 @@ pub async fn update_volume(
     let is_admin = require_role(&auth.role, &UserRole::ADMIN);
 
     if !is_owner && !is_admin {
-        write_audit_log(
+        if let Err(e) = write_audit_log(
             &state,
             Some(auth.user_id),
             None,
@@ -260,15 +289,18 @@ pub async fn update_volume(
             AuditSeverity::WARNING,
         )
         .await
-        .ok();
+        {
+            eprintln!("❌ AUDIT LOG FAILED (VOLUME_FORBIDDEN update): {e}");
+        }
 
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
 
-    // Sauver détails avant move
+    // 2) Sauver détails AVANT move (pour les logs)
     let new_name = payload.name.clone();
     let new_size = payload.size_bytes;
 
+    // 3) UPDATE
     let res = sqlx::query(
         r#"
         UPDATE volumes
@@ -289,8 +321,8 @@ pub async fn update_volume(
         return Err((StatusCode::NOT_FOUND, "Volume not found".into()));
     }
 
-    // ✅ Audit après succès
-    write_audit_log(
+    // 4) Audit succès (ne pas cacher l’erreur)
+    if let Err(e) = write_audit_log(
         &state,
         Some(auth.user_id),
         None,
@@ -302,7 +334,9 @@ pub async fn update_volume(
         AuditSeverity::INFO,
     )
     .await
-    .ok();
+    {
+        eprintln!("❌ AUDIT LOG FAILED (VOLUME_UPDATE): {e}");
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -316,7 +350,7 @@ pub async fn delete_volume(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    // Vérif owner/admin
+    // 1) Vérif owner/admin
     let owner_id: Uuid = sqlx::query_scalar("SELECT owner_id FROM volumes WHERE id = $1")
         .bind(id)
         .fetch_one(&state.db)
@@ -327,7 +361,7 @@ pub async fn delete_volume(
     let is_admin = require_role(&auth.role, &UserRole::ADMIN);
 
     if !is_owner && !is_admin {
-        write_audit_log(
+        if let Err(e) = write_audit_log(
             &state,
             Some(auth.user_id),
             None,
@@ -336,12 +370,14 @@ pub async fn delete_volume(
             AuditSeverity::WARNING,
         )
         .await
-        .ok();
+        {
+            eprintln!("❌ AUDIT LOG FAILED (VOLUME_FORBIDDEN delete): {e}");
+        }
 
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
 
-    // Delete
+    // 2) Delete
     let res = sqlx::query("DELETE FROM volumes WHERE id = $1")
         .bind(id)
         .execute(&state.db)
@@ -352,8 +388,8 @@ pub async fn delete_volume(
         return Err((StatusCode::NOT_FOUND, "Volume not found".into()));
     }
 
-    // ✅ Audit après succès
-    write_audit_log(
+    // 3) Audit succès (ne pas cacher l’erreur)
+    if let Err(e) = write_audit_log(
         &state,
         Some(auth.user_id),
         None,
@@ -362,7 +398,9 @@ pub async fn delete_volume(
         AuditSeverity::WARNING,
     )
     .await
-    .ok();
+    {
+        eprintln!("❌ AUDIT LOG FAILED (VOLUME_DELETE): {e}");
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }
