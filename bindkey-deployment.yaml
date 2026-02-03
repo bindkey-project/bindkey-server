@@ -10,87 +10,97 @@ spec:
     requests:
       storage: 1Gi
 ---
-# --- 2. DÉPLOIEMENT ---
+# --- 2. DÉPLOIEMENT : LA BASE DE DONNÉES ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: bindkey-deployment
+  name: bindkey-db-deployment
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: bindkey
+      app: bindkey-db
   template:
     metadata:
       labels:
-        app: bindkey
+        app: bindkey-db
     spec:
-      imagePullSecrets:
+      imagePullSecrets:     
         - name: ghcr-auth
       containers:
-        # --- COMPOSANT : API SERVEUR ---
-        - name: bindkey-api
-          image: ghcr.io/bindkey-project/bindkey-server/bindkey-server:v1.1
-          imagePullPolicy: Always
-          ports:
-            - containerPort: 8080
-          env:
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: bindkey-db-secrets
-                  key: dburl
-            - name: PWD_ENCRYPTION_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: bindkey-pwd-keys
-                  key: PWD_ENCRYPTION_KEY
-
-        # --- COMPOSANT : BASE DE DONNÉES ---
-        - name: bindkey-db
+        - name: postgres
           image: ghcr.io/bindkey-project/bindkey-server/bindkey-db:latest
-          # FORCE LE PROCESSUS POSTGRES À RESTER ACTIF
           args: ["postgres"]
           ports:
             - containerPort: 5432
           env:
             - name: POSTGRES_USER
               valueFrom:
-                secretKeyRef:
-                  name: bindkey-db-secrets
-                  key: username
+                secretKeyRef: { name: bindkey-db-secrets, key: username }
             - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: bindkey-db-secrets
-                  key: password
+              valueFrom: { secretKeyRef: { name: bindkey-db-secrets, key: password } }
             - name: POSTGRES_DB
-              valueFrom:
-                secretKeyRef:
-                  name: bindkey-db-secrets
-                  key: dbname
-            # DÉFINIT LE SOUS-DOSSIER POUR LA PERSISTANCE RÉELLE
+              valueFrom: { secretKeyRef: { name: bindkey-db-secrets, key: dbname } }
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           volumeMounts:
-            - name: bindkey-db-storage
+            - name: db-storage
               mountPath: /var/lib/postgresql/data
-      
       volumes:
-        - name: bindkey-db-storage
+        - name: db-storage
           persistentVolumeClaim:
             claimName: bindkey-db-pvc
 ---
-# --- 3. SERVICE ---
+# --- 3. SERVICE INTERNE : POUR LA DB ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bindkey-db-service
+spec:
+  selector:
+    app: bindkey-db
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+# --- 4. DÉPLOIEMENT : L'API RUST ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bindkey-api-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bindkey-api
+  template:
+    metadata:
+      labels:
+        app: bindkey-api
+    spec:
+      imagePullSecrets:
+        - name: ghcr-auth
+      containers:
+        - name: bindkey-api
+          image: ghcr.io/bindkey-project/bindkey-server/bindkey-server:v1
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: bindkey-db-secrets, key: dburl }
+            - name: PWD_ENCRYPTION_KEY
+              valueFrom: { secretKeyRef: { name: bindkey-pwd-keys, key: PWD_ENCRYPTION_KEY } }
+---
+# --- 5. SERVICE EXTERNE : POUR L'INGRESS ---
 apiVersion: v1
 kind: Service
 metadata:
   name: bindkey-service
 spec:
-  type: NodePort
   selector:
-    app: bindkey
+    app: bindkey-api
   ports:
     - port: 8080
       targetPort: 8080
-      nodePort: 30080
