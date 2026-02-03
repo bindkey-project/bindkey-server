@@ -96,7 +96,7 @@ pub async fn login_session(
     .fetch_optional(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-    .ok_or((StatusCode::UNAUTHORIZED, "Identifiants invalides v3".into()))?;
+    .ok_or((StatusCode::UNAUTHORIZED, "Identifiants invalides v4".into()))?;
 
     let user_id: Uuid = row.get("id");
     let bindkey_id: Uuid = row.get("bindkey_id");
