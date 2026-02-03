@@ -301,9 +301,10 @@ pub struct FullRegisterRequest {
     pub last_name: String,
     pub email: String,
     pub password: String,
-    pub bindkey_uid: String,
+    pub user_role: String,
+    pub bindkey_status: String,
     pub public_key: String, // On va la convertir en Base64 pour être compatible
-    pub fingerprint_template: String,
+    pub bindkey_uid:String,
 }
 
 #[derive(serde::Serialize)]
@@ -319,12 +320,12 @@ pub async fn register_user_with_key(
     State(state): State<AppState>,
     Json(payload): Json<FullRegisterRequest>,
 ) -> Result<Json<FullRegisterResponse>, (StatusCode, String)> {
-    // 1. RBAC Check
+    // 1. RBAC : Seul un ENROLLER ou ADMIN peut enregistrer
     if !require_role(&auth.role, &UserRole::ENROLLER) {
-        return Err((StatusCode::FORBIDDEN, "Seul un ENROLLER peut faire ça".into()));
+        return Err((StatusCode::FORBIDDEN, "Droits ENROLLER requis".into()));
     }
 
-    // 2. Démarrer une transaction SQL
+    // 2. Démarrer la transaction SQL
     let mut tx = state.db.begin().await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -342,11 +343,12 @@ pub async fn register_user_with_key(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .to_string();
 
-    // 4. Hachage et Chiffrement du mot de passe
+    // 4. Hachage Argon2 + Chiffrement AES du mot de passe
     let argon2_hash = middleware::hachage_argon2::hasher_mot_de_passe(&payload.password);
     let encrypted_password = middleware::aes_chiffrement::chiffrer_aes(&argon2_hash);
 
-    // 5. INSERT USER (Inclusion du recovery_code_hash)
+    // 5. INSERT USER
+    // On caste le rôle dynamiquement vers l'enum Postgres
     sqlx::query(
         r#"
         INSERT INTO users (
@@ -354,13 +356,14 @@ pub async fn register_user_with_key(
             role, status, password_hash, recovery_code_hash, 
             created_at, updated_at
         ) 
-        VALUES ($1, $2, $3, $4, 'USER', 'ACTIVE', $5, $6, now(), now())
+        VALUES ($1, $2, $3, $4, $5::text::user_role, 'ACTIVE', $6, $7, now(), now())
         "#
     )
     .bind(user_id)
     .bind(&payload.first_name)
     .bind(&payload.last_name)
     .bind(&payload.email)
+    .bind(&payload.user_role)
     .bind(encrypted_password)
     .bind(recovery_code_hash)
     .execute(&mut *tx)
@@ -368,24 +371,26 @@ pub async fn register_user_with_key(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("User SQL Error: {e}")))?;
 
     // 6. INSERT BINDKEY
+    // On insère "NULL" en dur pour fingerprint_template
     sqlx::query(
         r#"
         INSERT INTO bindkeys (
             id, user_id, bindkey_uid, fingerprint_template, public_key, status
         ) 
-        VALUES ($1, $2, $3, $4, $5, 'ACTIVE')
+        VALUES ($1, $2, $3, $4, $5, $6::text::bindkey_status)
         "#
     )
     .bind(bindkey_id)
     .bind(user_id)
     .bind(&payload.bindkey_uid)
-    .bind(&payload.fingerprint_template)
+    .bind("NULL") 
     .bind(&payload.public_key)
+    .bind(&payload.bindkey_status)
     .execute(&mut *tx)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("BindKey SQL Error: {e}")))?;
 
-    // 7. Finir la transaction
+    // 7. Validation de la transaction
     tx.commit().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // 8. Audit
@@ -398,6 +403,7 @@ pub async fn register_user_with_key(
         AuditSeverity::INFO
     ).await;
 
+    // 9. Réponse avec le recovery_code en clair (affiché une seule fois)
     Ok(Json(FullRegisterResponse {
         user_id,
         bindkey_id,
