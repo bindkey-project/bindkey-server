@@ -18,7 +18,7 @@ use axum::{Router, routing::post};
 
 // Import unique et propre des handlers (pas de doublons)
 use crate::api::handlers::session_handler::{
-    login_session, logout_session, refresh_session, verify_session,
+    login_session, logout_session, refresh_session, verify_session,test_session
 };
 
 use crate::db::AppState;
@@ -49,4 +49,11 @@ pub fn session_routes() -> Router<AppState> {
         // Révocation immédiate : suppression de la session
         // ─────────────────────────────────────────
         .route("/sessions/logout", post(logout_session))
+        //─────────────────────────────────────────
+        //POST /sessions/login
+        // 1) Vérifie email/password
+        // 2) Crée une session "pending
+        //route pour tester 
+        .route("/sessions/test", post(test_session))
+
 }

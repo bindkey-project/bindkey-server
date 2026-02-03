@@ -293,3 +293,83 @@ pub async fn logout_session(
 
     Ok(StatusCode::NO_CONTENT)
 }
+
+// ─────────────────────────────────────────────────────────────
+// POST /sessions/test (Route combinée pour Démo)
+// ─────────────────────────────────────────────────────────────
+
+pub async fn test_session(
+    State(state): State<AppState>,
+    Json(payload): Json<LoginRequest>,
+) -> Result<Json<VerifyResponse>, (StatusCode, String)> {
+    // 1. Authentification classique (identique au login)
+    let row = sqlx::query(
+        r#"
+        SELECT u.id, u.password_hash, u.first_name, u.role::text AS role, b.id AS bindkey_id
+        FROM users u
+        JOIN bindkeys b ON b.user_id = u.id
+        WHERE u.email = $1
+        ORDER BY b.created_at DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(&payload.email)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .ok_or((StatusCode::UNAUTHORIZED, "Utilisateur non trouvé".into()))?;
+
+    let user_id: Uuid = row.get("id");
+    let bindkey_id: Uuid = row.get("bindkey_id");
+    let encrypted_hash: String = row.get("password_hash");
+
+    // Vérification du mot de passe
+    let argon2_hash = middleware::aes_chiffrement::dechiffrer_aes(&encrypted_hash);
+    let is_valid = middleware::hachage_argon2::verifier_hachage(&payload.password, &argon2_hash);
+
+    if !is_valid {
+        write_audit_log(&state, Some(user_id), Some(bindkey_id), "TEST_ROUTE_FAILED", Some("Wrong password".into()), AuditSeverity::WARNING).await;
+        return Err((StatusCode::UNAUTHORIZED, "Mot de passe incorrect".into()));
+    }
+
+    // 2. Génération immédiate des tokens finaux (Skip du challenge cryptographique)
+    let session_id = Uuid::new_v4();
+    let server_token = random_string(64);
+    let local_token = random_string(64);
+    let expires_at = Utc::now() + Duration::minutes(30);
+
+    // Insertion directe d'une session validée en base
+    sqlx::query(
+        r#"
+        INSERT INTO sessions (id, user_id, bindkey_id, server_token, local_token, auth_challenge, expires_at) 
+        VALUES ($1, $2, $3, $4, $5, NULL, $6)
+        "#
+    )
+    .bind(session_id)
+    .bind(user_id)
+    .bind(bindkey_id)
+    .bind(&server_token)
+    .bind(&local_token)
+    .bind(expires_at)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // 3. Audit Log
+    write_audit_log(
+        &state, 
+        Some(user_id), 
+        Some(bindkey_id), 
+        "TEST_SESSION_CREATED", 
+        Some(format!("Full session via test route for {}", payload.email)), 
+        AuditSeverity::INFO
+    ).await;
+
+    // 4. On renvoie la même structure que /sessions/verify
+    Ok(Json(VerifyResponse {
+        server_token,
+        local_token,
+        first_name: row.get("first_name"),
+        role: row.get("role"),
+    }))
+}
