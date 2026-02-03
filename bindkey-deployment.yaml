@@ -82,7 +82,7 @@ spec:
         - name: ghcr-auth
       containers:
         - name: bindkey-api
-          image: ghcr.io/bindkey-project/bindkey-server/bindkey-server:v1
+          image: ghcr.io/bindkey-project/bindkey-server/bindkey-server:v1.0.1
           imagePullPolicy: Always
           ports:
             - containerPort: 8080

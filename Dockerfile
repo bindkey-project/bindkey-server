@@ -15,7 +15,8 @@ RUN echo "Mise à jour du binaire le $(date)" > /build_timestamp.txt
 COPY .sqlx .sqlx
 # On force SQLx à utiliser les données préparées
 ENV SQLX_OFFLINE=true
-
+ARG CACHE_BUST=1
+RUN touch src/main.rs
 # On compile en Release
 RUN cargo build --release
 
