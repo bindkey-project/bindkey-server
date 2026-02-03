@@ -66,12 +66,13 @@ pub struct LogoutRequest {
 // Helpers internes
 // ─────────────────────────────────────────────────────────────
 
-fn random_string(len: usize) -> String {
-    rng()
-        .sample_iter(&Alphanumeric)
-        .take(len)
-        .map(char::from)
-        .collect()
+fn random_challenge_hex() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 16]; // 16 octets = 32 caractères hexadécimaux
+    rand::rng().fill_bytes(&mut bytes);
+    
+    // Conversion en Hexa Majuscule
+    bytes.iter().map(|b| format!("{:02X}", b)).collect()
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -113,7 +114,7 @@ pub async fn login_session(
         return Err((StatusCode::UNAUTHORIZED, "Identifiants invalides".into()));
     }
     let session_id = Uuid::new_v4();
-    let auth_challenge = random_string(32);
+    let auth_challenge = random_challenge_hex();
     let expires_at = Utc::now() + Duration::minutes(5);
 
     sqlx::query("INSERT INTO sessions (id, user_id, bindkey_id, auth_challenge, expires_at) VALUES ($1, $2, $3, $4, $5)")
