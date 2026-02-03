@@ -66,6 +66,13 @@ pub struct LogoutRequest {
 // Helpers internes
 // ─────────────────────────────────────────────────────────────
 
+fn random_string(len: usize) -> String {
+    rng()
+        .sample_iter(&Alphanumeric)
+        .take(len)
+        .map(char::from)
+        .collect()
+}
 fn random_challenge_hex() -> String {
     use rand::RngCore;
     let mut bytes = [0u8; 16]; // 16 octets = 32 caractères hexadécimaux
