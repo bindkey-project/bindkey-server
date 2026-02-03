@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 COPY . .
-
+RUN echo "Mise à jour du binaire le $(date)" > /build_timestamp.txt
 # 1. Copie le dossier .sqlx dans l'image de build
 COPY .sqlx .sqlx
 # On force SQLx à utiliser les données préparées
