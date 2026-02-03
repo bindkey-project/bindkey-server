@@ -6,7 +6,7 @@
 use crate::db::AppState;
 use chrono::Utc;
 use uuid::Uuid;
-
+use tracing::{info, error, debug};
 #[derive(Debug, Clone, Copy)]
 pub enum AuditSeverity {
     INFO,
@@ -36,47 +36,42 @@ pub async fn write_audit_log(
     details: Option<String>,
     severity: AuditSeverity,
 ) {
-    let now = Utc::now();
-    let id = Uuid::new_v4();
+    debug!("⏳ Tentative d'audit: action={} pour user={:?}", action, user_id);
 
-    // On prépare la requête
     let query_result = sqlx::query(
         r#"
         INSERT INTO audit_logs (id, user_id, bindkey_id, action, details, severity, created_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#,
     )
-    .bind(id)
+    .bind(Uuid::new_v4())
     .bind(user_id)
     .bind(bindkey_id)
     .bind(action)
     .bind(details)
     .bind(severity.as_str())
-    .bind(now)
+    .bind(Utc::now())
     .execute(&state.db)
     .await;
 
-    // --- LE MATCH MAGIQUE ---
     match query_result {
         Ok(_) => {
-            println!("✅ Audit inséré : {} pour l'utilisateur {:?}", action, user_id);
+            info!("✅ Audit inséré : {} pour l'utilisateur {:?}", action, user_id);
         }
         Err(e) => {
-            // Ici on logue l'erreur spécifiquement sans faire crash l'API
-            eprintln!("❌ ÉCHEC AUDIT [{}]:", action);
-            
+            error!("❌ ÉCHEC AUDIT [{}]:", action);
             match e {
                 sqlx::Error::Database(db_err) => {
-                    eprintln!("   -> Erreur DB : {}", db_err.message());
+                    error!("   -> Erreur DB : {}", db_err.message());
                     if let Some(code) = db_err.code() {
-                        eprintln!("   -> Code SQL : {}", code); // Ex: 23505 pour violation d'unicité
+                        error!("   -> Code SQL : {}", code); 
                     }
                 }
                 sqlx::Error::PoolTimedOut => {
-                    eprintln!("   -> Timeout : La base de données est trop lente ou saturée.");
+                    error!("   -> Timeout : La base de données est trop lente ou saturée.");
                 }
                 _ => {
-                    eprintln!("   -> Autre erreur SQLx : {:?}", e);
+                    error!("   -> Autre erreur SQLx : {:?}", e);
                 }
             }
         }
