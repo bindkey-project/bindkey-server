@@ -92,6 +92,8 @@ spec:
                 secretKeyRef: { name: bindkey-db-secrets, key: dburl }
             - name: PWD_ENCRYPTION_KEY
               valueFrom: { secretKeyRef: { name: bindkey-pwd-keys, key: PWD_ENCRYPTION_KEY } }
+              - name: RUST_LOG
+              value: "debug"
 ---
 # --- 5. SERVICE EXTERNE : POUR L'INGRESS ---
 apiVersion: v1
