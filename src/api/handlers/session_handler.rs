@@ -173,10 +173,10 @@ pub async fn verify_session(
    
     let user_id: Uuid = row.get("user_id");
     let bindkey_id: Uuid = row.get("bindkey_id");
-    let challenge: String = row.get("auth_challenge");
+    let challenge: String = row.get("auth_challenge"); // C'est ton Hexa Majuscule
     let public_key_b64: String = row.get("public_key");
 
-    // 2. Décodage de la clé publique Ed25519
+    // 2. Décodage de la clé publique Ed25519 (Stockée en Base64 dans la DB)
     let pub_key_bytes = general_purpose::STANDARD.decode(&public_key_b64)
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Clé publique invalide".into()))?;
     
@@ -186,35 +186,34 @@ pub async fn verify_session(
     let verifying_key = VerifyingKey::from_bytes(&pub_key_array)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Format clé Ed25519 invalide".into()))?;
 
-    // 3. Décodage de la signature reçue
-    let sig_bytes = general_purpose::STANDARD.decode(&payload.signature)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Signature Base64 invalide".into()))?;
+    // 3. ADAPTATION : Décodage de la signature reçue en HEXADÉCIMAL
+    let sig_bytes = hex::decode(&payload.signature)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Format de signature Hexa invalide".into()))?;
     
     let sig_array: [u8; 64] = sig_bytes.try_into()
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Taille signature incorrecte".into()))?;
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Taille signature incorrecte (64 octets attendus)".into()))?;
     
     let signature = Signature::from_bytes(&sig_array);
 
     // 4. Vérification cryptographique
-match verifying_key.verify(challenge.as_bytes(), &signature) {
-    Ok(_) => {
-        // Tout est bon, on continue la fonction
-        println!("🔒 Signature Ed25519 vérifiée avec succès");
-    },
-    Err(e) => {
-        // C'EST ICI que l'on logue l'échec avant de quitter
-        write_audit_log(
-            &state, 
-            Some(user_id), 
-            Some(bindkey_id), 
-            "VERIFY_FAILED", 
-            Some(format!("Signature invalide pour la session {}: {}", payload.session_id, e)), 
-            AuditSeverity::ERROR
-        ).await;
+    // On vérifie la signature contre les octets du texte HEX du challenge
+    match verifying_key.verify(challenge.as_bytes(), &signature) {
+        Ok(_) => {
+            println!("🔒 Signature Ed25519 vérifiée avec succès");
+        },
+        Err(e) => {
+            write_audit_log(
+                &state, 
+                Some(user_id), 
+                Some(bindkey_id), 
+                "VERIFY_FAILED", 
+                Some(format!("Signature invalide pour la session {}: {}", payload.session_id, e)), 
+                AuditSeverity::ERROR
+            ).await;
 
-        return Err((StatusCode::UNAUTHORIZED, "Signature invalide".into()));
+            return Err((StatusCode::UNAUTHORIZED, "Signature invalide".into()));
+        }
     }
-}
 
     // 5. Génération des tokens de session finale
     let server_token = random_string(64);
@@ -234,7 +233,7 @@ match verifying_key.verify(challenge.as_bytes(), &signature) {
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // 6. Audit Log du succès
-   write_audit_log(
+    write_audit_log(
         &state, 
         Some(user_id), 
         Some(bindkey_id), 
@@ -242,6 +241,7 @@ match verifying_key.verify(challenge.as_bytes(), &signature) {
         None, 
         AuditSeverity::INFO
     ).await;
+
     Ok(Json(VerifyResponse {
         server_token,
         local_token,
