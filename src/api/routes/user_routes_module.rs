@@ -12,7 +12,7 @@ use axum::{
 
 // On importe explicitement les handlers Users
 use crate::api::handlers::user_handler::{
-    create_user, get_user_by_email, get_user_by_id, update_user_status,
+    create_user, get_user_by_email, get_user_by_id, update_user_status,register_user_with_key,
 };
 
 // Fonction appelée depuis api/mod.rs via .merge(user_routes())
@@ -28,4 +28,5 @@ pub fn user_routes() -> Router<crate::db::AppState> {
         .route("/users/:id/status", patch(update_user_status))
         // GET /admin/users
         .route("/admin/users", get(list_users))
+        .route("/auth/register", post(register_user_with_key))
 }

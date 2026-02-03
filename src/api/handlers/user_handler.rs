@@ -294,3 +294,66 @@ pub async fn list_users(
 
     Ok(Json(users))
 }
+
+#[derive(serde::Deserialize)]
+pub struct FullRegisterRequest {
+    pub first_name: String,
+    pub last_name: String,
+    pub email: String,
+    pub password: String,
+    pub bindkey_uid: String,
+    pub public_key: String, // On va la convertir en Base64 pour être compatible
+    pub fingerprint_template: String,
+}
+
+pub async fn register_user_with_key(
+    Extension(auth): Extension<AuthUser>,
+    State(state): State<AppState>,
+    Json(payload): Json<FullRegisterRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    // 1. RBAC Check
+    if !require_role(&auth.role, &UserRole::ENROLLER) {
+        return Err((StatusCode::FORBIDDEN, "Seul un ENROLLER peut faire ça".into()));
+    }
+
+    // 2. Démarrer une transaction SQL
+    let mut tx = state.db.begin().await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let user_id = Uuid::new_v4();
+    let bindkey_id = Uuid::new_v4();
+
+    // 3. Hachage et Chiffrement du mot de passe
+    // On hache le password reçu du front, puis on chiffre le hash en AES
+    let argon2_hash = middleware::hachage_argon2::hasher_mot_de_passe(&payload.password);
+    let encrypted_password = middleware::aes_chiffrement::chiffrer_aes(&argon2_hash);
+
+    // 4. INSERT USER
+    sqlx::query(
+        "INSERT INTO users (id, first_name, last_name, email, role, status, password_hash, created_at, updated_at) 
+         VALUES ($1, $2, $3, $4, 'USER', 'ACTIVE', $5, now(), now())"
+    )
+    .bind(user_id).bind(&payload.first_name).bind(&payload.last_name)
+    .bind(&payload.email).bind(encrypted_password)
+    .execute(&mut *tx).await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("User SQL Error: {e}")))?;
+
+    // 5. INSERT BINDKEY (On s'assure que la clé est bien stockée)
+    // Astuce : Si ta clé arrive en HEX, convertis-la en Base64 ici pour ton handler de verify
+    sqlx::query(
+        "INSERT INTO bindkeys (id, user_id, bindkey_uid, fingerprint_template, public_key, status) 
+         VALUES ($1, $2, $3, $4, $5, 'ACTIVE')"
+    )
+    .bind(bindkey_id).bind(user_id).bind(&payload.bindkey_uid)
+    .bind(&payload.fingerprint_template).bind(&payload.public_key)
+    .execute(&mut *tx).await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("BindKey SQL Error: {e}")))?;
+
+    // 6. Finir la transaction
+    tx.commit().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // 7. Audit
+    write_audit_log(&state, Some(auth.user_id), None, "FULL_ENROLLMENT", Some(format!("user={user_id} key={bindkey_id}")), AuditSeverity::INFO).await;
+
+    Ok(StatusCode::CREATED)
+}
