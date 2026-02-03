@@ -106,10 +106,12 @@ pub async fn login_session(
     let is_valid = middleware::hachage_argon2::verifier_hachage(&payload.password, &argon2_hash);
 
     if !is_valid {
-        let _ = write_audit_log(&state, Some(user_id), Some(bindkey_id), "LOGIN_FAILED", Some("Wrong password".into()), AuditSeverity::WARNING).await;
+        // Version simplifiée : on lance l'audit et on n'attend pas forcément le résultat 
+        // pour bloquer l'utilisateur, mais on utilise notre nouvelle fonction avec match.
+        write_audit_log(&state, Some(user_id), Some(bindkey_id), "LOGIN_FAILED", Some("Wrong password".into()), AuditSeverity::WARNING).await;
+        
         return Err((StatusCode::UNAUTHORIZED, "Identifiants invalides".into()));
     }
-
     let session_id = Uuid::new_v4();
     let auth_challenge = random_string(32);
     let expires_at = Utc::now() + Duration::minutes(5);
@@ -124,12 +126,14 @@ pub async fn login_session(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-   if let Err(e) = write_audit_log(&state, Some(user_id), Some(bindkey_id), "LOGIN", Some(format!("session_id={session_id}")), AuditSeverity::INFO).await {
-    // Cela s'affichera dans 'kubectl logs'
-    eprintln!("❌ ERREUR AUDIT LOG : {:?}", e);
-} else {
-    println!("✅ Audit log écrit avec succès pour user_id: {}", user_id);
-}
+   write_audit_log(
+        &state, 
+        Some(user_id), 
+        Some(bindkey_id), 
+        "LOGIN_INITIATED", 
+        Some(format!("Session créée: {}", session_id)), 
+        AuditSeverity::INFO
+    ).await;
     Ok(Json(LoginResponse { session_id, auth_challenge }))
 }
 
@@ -184,11 +188,25 @@ pub async fn verify_session(
     let signature = Signature::from_bytes(&sig_array);
 
     // 4. Vérification cryptographique
-    verifying_key.verify(challenge.as_bytes(), &signature)
-        .map_err(|_| {
-            // Optionnel : tu pourrais loguer un VERIFY_FAILED ici pour la sécurité
-            (StatusCode::UNAUTHORIZED, "Signature invalide".into())
-        })?;
+match verifying_key.verify(challenge.as_bytes(), &signature) {
+    Ok(_) => {
+        // Tout est bon, on continue la fonction
+        println!("🔒 Signature Ed25519 vérifiée avec succès");
+    },
+    Err(e) => {
+        // C'EST ICI que l'on logue l'échec avant de quitter
+        write_audit_log(
+            &state, 
+            Some(user_id), 
+            Some(bindkey_id), 
+            "VERIFY_FAILED", 
+            Some(format!("Signature invalide pour la session {}: {}", payload.session_id, e)), 
+            AuditSeverity::ERROR
+        ).await;
+
+        return Err((StatusCode::UNAUTHORIZED, "Signature invalide".into()));
+    }
+}
 
     // 5. Génération des tokens de session finale
     let server_token = random_string(64);
@@ -208,15 +226,14 @@ pub async fn verify_session(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // 6. Audit Log du succès
-    let _ = write_audit_log(
+   write_audit_log(
         &state, 
         Some(user_id), 
         Some(bindkey_id), 
         "VERIFY_SUCCESS", 
-        Some(format!("Session {} verified", payload.session_id)), 
+        None, 
         AuditSeverity::INFO
     ).await;
-
     Ok(Json(VerifyResponse {
         server_token,
         local_token,

@@ -35,13 +35,12 @@ pub async fn write_audit_log(
     action: &str,
     details: Option<String>,
     severity: AuditSeverity,
-) -> Result<(), sqlx::Error> {
-    eprintln!("🚀 AUDIT ATTEMPT: action={}, user={:?}", action, user_id);
+) {
+    let now = Utc::now();
     let id = Uuid::new_v4();
 
-    let now = Utc::now();
-
-    sqlx::query(
+    // On prépare la requête
+    let query_result = sqlx::query(
         r#"
         INSERT INTO audit_logs (id, user_id, bindkey_id, action, details, severity, created_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -55,7 +54,31 @@ pub async fn write_audit_log(
     .bind(severity.as_str())
     .bind(now)
     .execute(&state.db)
-    .await?;
+    .await;
 
-    Ok(())
+    // --- LE MATCH MAGIQUE ---
+    match query_result {
+        Ok(_) => {
+            println!("✅ Audit inséré : {} pour l'utilisateur {:?}", action, user_id);
+        }
+        Err(e) => {
+            // Ici on logue l'erreur spécifiquement sans faire crash l'API
+            eprintln!("❌ ÉCHEC AUDIT [{}]:", action);
+            
+            match e {
+                sqlx::Error::Database(db_err) => {
+                    eprintln!("   -> Erreur DB : {}", db_err.message());
+                    if let Some(code) = db_err.code() {
+                        eprintln!("   -> Code SQL : {}", code); // Ex: 23505 pour violation d'unicité
+                    }
+                }
+                sqlx::Error::PoolTimedOut => {
+                    eprintln!("   -> Timeout : La base de données est trop lente ou saturée.");
+                }
+                _ => {
+                    eprintln!("   -> Autre erreur SQLx : {:?}", e);
+                }
+            }
+        }
+    }
 }

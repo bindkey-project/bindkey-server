@@ -139,8 +139,8 @@ pub async fn create_volume(
         Some(format!("volume_id={}", payload.volume_id)),
         AuditSeverity::INFO,
     )
-    .await
-    .ok();
+    .await;
+    
 
     Ok(Json(CreateVolumeResponse {
         volume_id: payload.volume_id,
@@ -176,9 +176,8 @@ pub async fn get_volume(
             Some(format!("get denied volume_id={}", id)),
             AuditSeverity::WARNING,
         )
-        .await
-        .ok();
-
+        .await;
+        
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
 
@@ -207,8 +206,8 @@ pub async fn list_user_volumes(
             Some(format!("list denied target_user_id={}", user_id)),
             AuditSeverity::WARNING,
         )
-        .await
-        .ok();
+        .await;
+       
 
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
@@ -259,8 +258,8 @@ pub async fn update_volume(
             Some(format!("update denied volume_id={}", id)),
             AuditSeverity::WARNING,
         )
-        .await
-        .ok();
+        .await;
+      
 
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
@@ -301,8 +300,8 @@ pub async fn update_volume(
         )),
         AuditSeverity::INFO,
     )
-    .await
-    .ok();
+    .await;
+   
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -335,8 +334,8 @@ pub async fn delete_volume(
             Some(format!("delete denied volume_id={}", id)),
             AuditSeverity::WARNING,
         )
-        .await
-        .ok();
+        .await;
+       
 
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
@@ -361,8 +360,8 @@ pub async fn delete_volume(
         Some(format!("volume_id={} deleted", id)),
         AuditSeverity::WARNING,
     )
-    .await
-    .ok();
+    .await;
+    
 
     Ok(StatusCode::NO_CONTENT)
 }

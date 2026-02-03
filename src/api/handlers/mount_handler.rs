@@ -50,7 +50,7 @@ pub struct MountResponse {
     pub message: String,
 }
 
-//
+
 // ─────────────────────────────────────────────────────────────
 // POST /mount
 // ─────────────────────────────────────────────────────────────
@@ -87,8 +87,8 @@ pub async fn mount_volume(
                 Some(format!("Volume not found: volume_id={}", payload.volume_id)),
                 AuditSeverity::WARNING,
             )
-            .await
-            .ok();
+            .await;
+            
 
             return Err((StatusCode::NOT_FOUND, "Volume not found".into()));
         }
@@ -133,8 +133,8 @@ pub async fn mount_volume(
                     Some(format!("Permission check error: {e}")),
                     AuditSeverity::ERROR,
                 )
-                .await
-                .ok();
+                .await;
+                
 
                 return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")));
             }
@@ -150,8 +150,8 @@ pub async fn mount_volume(
             Some(format!("Access denied for volume_id={}", payload.volume_id)),
             AuditSeverity::WARNING,
         )
-        .await
-        .ok();
+        .await;
+        
 
         return Err((
             StatusCode::FORBIDDEN,
@@ -185,8 +185,8 @@ pub async fn mount_volume(
             Some(format!("Insert failed: {e}")),
             AuditSeverity::ERROR,
         )
-        .await
-        .ok();
+        .await;
+        
 
         return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")));
     }
@@ -202,8 +202,8 @@ pub async fn mount_volume(
         Some(format!("Mounted volume_id={}", payload.volume_id)),
         AuditSeverity::INFO,
     )
-    .await
-    .ok();
+    .await;
+   
 
     Ok(Json(MountResponse {
         mount_id,
@@ -252,8 +252,8 @@ pub async fn unmount_volume(
                 Some(format!("Mount not found: mount_id={}", mount_id)),
                 AuditSeverity::WARNING,
             )
-            .await
-            .ok();
+            .await;
+           
 
             return Err((StatusCode::NOT_FOUND, "Mount not found".into()));
         }
@@ -279,8 +279,8 @@ pub async fn unmount_volume(
             Some(format!("Access denied for mount_id={}", mount_id)),
             AuditSeverity::WARNING,
         )
-        .await
-        .ok();
+        .await;
+       
 
         return Err((
             StatusCode::FORBIDDEN,
@@ -320,8 +320,8 @@ pub async fn unmount_volume(
         )),
         AuditSeverity::INFO,
     )
-    .await
-    .ok();
+    .await;
+    
 
     Ok(StatusCode::NO_CONTENT)
 }
