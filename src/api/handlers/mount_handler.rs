@@ -49,8 +49,6 @@ pub struct MountResponse {
     pub mount_id: Uuid,
     pub message: String,
 }
- 
- 
 // ─────────────────────────────────────────────────────────────
 // POST /mount
 // ─────────────────────────────────────────────────────────────
@@ -89,7 +87,6 @@ pub async fn mount_volume(
             )
             .await;
             
- 
             return Err((StatusCode::NOT_FOUND, "Volume not found".into()));
         }
         Err(e) => {
@@ -135,7 +132,6 @@ pub async fn mount_volume(
                 )
                 .await;
                 
- 
                 return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")));
             }
         }
@@ -152,7 +148,6 @@ pub async fn mount_volume(
         )
         .await;
         
- 
         return Err((
             StatusCode::FORBIDDEN,
             "Not allowed to mount this volume".into(),
@@ -187,7 +182,6 @@ pub async fn mount_volume(
         )
         .await;
         
- 
         return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")));
     }
  
@@ -204,7 +198,6 @@ pub async fn mount_volume(
     )
     .await;
    
- 
     Ok(Json(MountResponse {
         mount_id,
         message: "Mounted successfully".into(),
@@ -254,7 +247,6 @@ pub async fn unmount_volume(
             )
             .await;
            
- 
             return Err((StatusCode::NOT_FOUND, "Mount not found".into()));
         }
         Err(e) => {
@@ -281,7 +273,6 @@ pub async fn unmount_volume(
         )
         .await;
        
- 
         return Err((
             StatusCode::FORBIDDEN,
             "Not allowed to unmount this mount".into(),
@@ -322,6 +313,5 @@ pub async fn unmount_volume(
     )
     .await;
     
- 
     Ok(StatusCode::NO_CONTENT)
 }

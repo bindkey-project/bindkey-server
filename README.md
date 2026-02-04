@@ -29,3 +29,5 @@ sudo -E kubectl port-forward --address 0.0.0.0 -n ingress-nginx service/ingress-
 kubectl logs -f -l app.kubernetes.io/name=ingress-nginx -n ingress-nginx
 
 kubectl exec -it bindkey-deployment-85d87f9556-j4fzn -c bindkey-db -- psql -U admin_bindkey -d bindkey
+
+la signature sans le préfixe 0x, juste les caractères de 0-9 et A-F

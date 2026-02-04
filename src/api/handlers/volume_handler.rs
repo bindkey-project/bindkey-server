@@ -140,8 +140,7 @@ pub async fn create_volume(
         AuditSeverity::INFO,
     )
     .await;
-    
- 
+
     Ok(Json(CreateVolumeResponse {
         volume_id: payload.volume_id,
         message: "Volume created".into(),
@@ -208,7 +207,6 @@ pub async fn list_user_volumes(
         )
         .await;
        
- 
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
  
@@ -259,8 +257,7 @@ pub async fn update_volume(
             AuditSeverity::WARNING,
         )
         .await;
-      
- 
+    
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
  
@@ -302,7 +299,6 @@ pub async fn update_volume(
     )
     .await;
    
- 
     Ok(StatusCode::NO_CONTENT)
 }
  
@@ -336,7 +332,6 @@ pub async fn delete_volume(
         )
         .await;
        
- 
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
  
@@ -362,6 +357,5 @@ pub async fn delete_volume(
     )
     .await;
     
- 
     Ok(StatusCode::NO_CONTENT)
 }

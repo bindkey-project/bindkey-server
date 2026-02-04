@@ -80,7 +80,9 @@ spec:
       annotations:
         # Cette ligne permet de forcer le restart via kubectl rollout restart
         # sans avoir à changer manuellement le SHA à chaque fois
+
         kubectl.kubernetes.io/restartedAt: ""
+
     spec:
       imagePullSecrets:
         - name: ghcr-auth
