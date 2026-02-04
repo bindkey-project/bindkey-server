@@ -418,12 +418,12 @@ pub async fn delete_user(
     State(state): State<AppState>,
     Path(user_id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    // 1. Sécurité : Admin uniquement
+    // ✅ Admin only
     if !require_role(&auth.role, &UserRole::ADMIN) {
         return Err((StatusCode::FORBIDDEN, "ADMIN required".into()));
     }
 
-    // 2. Sécurité : Empêcher le suicide de compte
+    // (optionnel mais conseillé) empêcher l'admin de se supprimer lui-même
     if auth.user_id == user_id {
         return Err((StatusCode::BAD_REQUEST, "You cannot delete your own admin account".into()));
     }
@@ -431,38 +431,30 @@ pub async fn delete_user(
     let mut tx = state.db.begin().await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    // 3. Suppression en cascade (Sessions -> Bindkeys -> User)
-    // Supprimer les sessions pour déconnecter immédiatement l'utilisateur
-    sqlx::query("DELETE FROM sessions WHERE user_id = $1")
-        .bind(user_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error sessions: {e}")))?;
-
-    // Supprimer les clés liées
+    // ⚠️ Si tu as une table bindkeys liée à users, supprime d'abord les bindkeys
     sqlx::query("DELETE FROM bindkeys WHERE user_id = $1")
         .bind(user_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error bindkeys: {e}")))?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
 
-    // Supprimer l'utilisateur
+    // Supprimer le user
     let res = sqlx::query("DELETE FROM users WHERE id = $1")
-        .bind(user_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error user: {e}")))?;
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
 
     if res.rows_affected() == 0 {
-        // Pas besoin de rollback manuel, tx sera drop à la fin de la fonction
-        return Err((StatusCode::NOT_FOUND, "User not found".into()));
-    }
+    return Err((StatusCode::NOT_FOUND, "User not found".into()));
+}
 
     tx.commit().await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    // 4. Audit Log
-    write_audit_log(
+
+    // Audit
+    let _ = write_audit_log(
         &state,
         Some(auth.user_id),
         None,
