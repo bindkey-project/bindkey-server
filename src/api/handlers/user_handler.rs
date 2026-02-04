@@ -312,7 +312,7 @@ pub struct FullRegisterResponse {
     pub recovery_code: String,
     pub message: String,
 }
-
+ 
 pub async fn register_user_with_key(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
@@ -322,38 +322,38 @@ pub async fn register_user_with_key(
     if !require_role(&auth.role, &UserRole::ENROLLER) {
         return Err((StatusCode::FORBIDDEN, "Droits ENROLLER requis".into()));
     }
-
+ 
     // 2. Démarrer la transaction SQL
     let mut tx = state.db.begin().await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
+ 
     let user_id = Uuid::new_v4();
     let bindkey_id = Uuid::new_v4();
-
+ 
     // 3. Génération du Recovery Code (indispensable pour la contrainte NOT NULL)
     let mut raw = [0u8; 16];
     OsRng.fill_bytes(&mut raw);
     let recovery_code = URL_SAFE_NO_PAD.encode(raw);
-
+ 
     let salt = SaltString::generate(&mut OsRng);
     let recovery_code_hash = Argon2::default()
         .hash_password(recovery_code.as_bytes(), &salt)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .to_string();
-
+ 
     // 4. Hachage Argon2 + Chiffrement AES du mot de passe
     let argon2_hash = middleware::hachage_argon2::hasher_mot_de_passe(&payload.password);
     let encrypted_password = middleware::aes_chiffrement::chiffrer_aes(&argon2_hash);
-
+ 
     // 5. INSERT USER
     // On caste le rôle dynamiquement vers l'enum Postgres
     sqlx::query(
         r#"
         INSERT INTO users (
-            id, first_name, last_name, email, 
-            role, status, password_hash, recovery_code_hash, 
+            id, first_name, last_name, email,
+            role, status, password_hash, recovery_code_hash,
             created_at, updated_at
-        ) 
+        )
         VALUES ($1, $2, $3, $4, $5::text::user_role, 'ACTIVE', $6, $7, now(), now())
         "#
     )
@@ -367,7 +367,7 @@ pub async fn register_user_with_key(
     .execute(&mut *tx)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("User SQL Error: {e}")))?;
-
+ 
     // 6. INSERT BINDKEY
     // On insère "NULL" en dur pour fingerprint_template
     sqlx::query(
@@ -418,50 +418,41 @@ pub async fn delete_user(
     State(state): State<AppState>,
     Path(user_id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    // ✅ Admin only
     if !require_role(&auth.role, &UserRole::ADMIN) {
         return Err((StatusCode::FORBIDDEN, "ADMIN required".into()));
     }
-
-    // (optionnel mais conseillé) empêcher l'admin de se supprimer lui-même
+ 
     if auth.user_id == user_id {
-        return Err((StatusCode::BAD_REQUEST, "You cannot delete your own admin account".into()));
+        return Err((StatusCode::BAD_REQUEST, "Cannot delete yourself".into()));
     }
-
+ 
     let mut tx = state.db.begin().await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    // ⚠️ Si tu as une table bindkeys liée à users, supprime d'abord les bindkeys
-    sqlx::query("DELETE FROM bindkeys WHERE user_id = $1")
+ 
+    // ✅ On supprime SEULEMENT le user
+    // bindkeys seront supprimées automatiquement grâce à ON DELETE CASCADE
+    let res = sqlx::query("DELETE FROM users WHERE id = $1")
         .bind(user_id)
         .execute(&mut *tx)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
-
-    // Supprimer le user
-    let res = sqlx::query("DELETE FROM users WHERE id = $1")
-    .bind(user_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
-
+ 
     if res.rows_affected() == 0 {
-    return Err((StatusCode::NOT_FOUND, "User not found".into()));
-}
-
+        return Err((StatusCode::NOT_FOUND, "User not found".into()));
+    }
+ 
     tx.commit().await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-
-    // Audit
+ 
     let _ = write_audit_log(
         &state,
         Some(auth.user_id),
         None,
         "USER_DELETE",
-        Some(format!("Deleted user_id: {user_id}")),
+        Some(format!("target_user_id={user_id}")),
         AuditSeverity::WARNING,
-    ).await;
-
+    )
+    .await;
+ 
     Ok(StatusCode::NO_CONTENT)
 }
