@@ -223,26 +223,29 @@ pub async fn verify_session(
     let signature = Signature::from_slice(&sig_bytes)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Format de signature ECDSA invalide".into()))?;
 
-    // 4. Vérification cryptographique (Double tentative)
-    let challenge_bytes_ascii = challenge.as_bytes();
-    let challenge_bytes_bin = hex::decode(&challenge).unwrap_or_default();
+    // 4. Vérification cryptographique (Version Hardware Compatible)
+    
+    // On convertit le challenge Hexa (String) en octets binaires (32 octets)
+    let challenge_bytes = hex::decode(&challenge)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Challenge en base invalide (Hexa attendu)".into()))?;
 
-    // Tentative 1 : ASCII (Texte brut)
-    let res = verifying_key.verify(challenge_bytes_ascii, &signature)
-        .or_else(|_| {
-            // Tentative 2 : Binaire (Si le premier échoue)
-            println!("DEBUG: Échec ASCII, tentative avec challenge BINAIRE...");
-            verifying_key.verify(&challenge_bytes_bin, &signature)
-        });
-
-    match res {
+    // On utilise PrehashVerifier pour correspondre à la logique de l'ESP
+    use p256::ecdsa::signature::hazmat::PrehashVerifier;
+    
+    match verifying_key.verify_prehash(&challenge_bytes, &signature) {
         Ok(_) => {
-            println!("🔒 Signature ECDSA P-256 vérifiée avec succès !");
+            println!("🔒 Signature VALID (prehash verify: challenge treated as 32-byte digest)");
         },
         Err(e) => {
-            let detail_err = format!("Échec des deux méthodes (ASCII et Binaire). Erreur: {}", e);
-            write_audit_log(&state, Some(user_id), Some(bindkey_id), "VERIFY_FAILED", Some(detail_err.clone()), AuditSeverity::ERROR).await;
-            return Err((StatusCode::UNAUTHORIZED, format!("ERREUR: {}", detail_err)));
+            // Tentative de secours : au cas où certains utilisent encore le format ASCII
+            println!("DEBUG: Échec prehash, tentative de secours en mode standard...");
+            if verifying_key.verify(challenge.as_bytes(), &signature).is_ok() {
+                println!("🔒 Signature VALID (standard verify)");
+            } else {
+                let detail_err = format!("Signature invalide. Le matériel attend un digest de 32 octets. Erreur: {}", e);
+                write_audit_log(&state, Some(user_id), Some(bindkey_id), "VERIFY_FAILED", Some(detail_err.clone()), AuditSeverity::ERROR).await;
+                return Err((StatusCode::UNAUTHORIZED, format!("ERREUR: {}", detail_err)));
+            }
         }
     }
 
