@@ -223,23 +223,26 @@ pub async fn verify_session(
     let signature = Signature::from_slice(&sig_bytes)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Format de signature ECDSA invalide".into()))?;
 
-    // 4. Vérification cryptographique
-    // On vérifie contre les bytes du challenge (ASCII)
-    match verifying_key.verify(challenge.as_bytes(), &signature) {
+    // 4. Vérification cryptographique (Double tentative)
+    let challenge_bytes_ascii = challenge.as_bytes();
+    let challenge_bytes_bin = hex::decode(&challenge).unwrap_or_default();
+
+    // Tentative 1 : ASCII (Texte brut)
+    let res = verifying_key.verify(challenge_bytes_ascii, &signature)
+        .or_else(|_| {
+            // Tentative 2 : Binaire (Si le premier échoue)
+            println!("DEBUG: Échec ASCII, tentative avec challenge BINAIRE...");
+            verifying_key.verify(&challenge_bytes_bin, &signature)
+        });
+
+    match res {
         Ok(_) => {
-            println!("🔒 Signature ECDSA P-256 vérifiée avec succès");
+            println!("🔒 Signature ECDSA P-256 vérifiée avec succès !");
         },
         Err(e) => {
-            write_audit_log(
-                &state, 
-                Some(user_id), 
-                Some(bindkey_id), 
-                "VERIFY_FAILED", 
-                Some(format!("Signature ECDSA invalide pour la session {}: {}", payload.session_id, e)), 
-                AuditSeverity::ERROR
-            ).await;
-
-            return Err((StatusCode::UNAUTHORIZED, "Signature invalide".into()));
+            let detail_err = format!("Échec des deux méthodes (ASCII et Binaire). Erreur: {}", e);
+            write_audit_log(&state, Some(user_id), Some(bindkey_id), "VERIFY_FAILED", Some(detail_err.clone()), AuditSeverity::ERROR).await;
+            return Err((StatusCode::UNAUTHORIZED, format!("ERREUR: {}", detail_err)));
         }
     }
 
