@@ -154,6 +154,9 @@ pub async fn verify_session(
     State(state): State<AppState>,
     Json(payload): Json<VerifyRequest>,
 ) -> Result<Json<VerifyResponse>, (StatusCode, String)> {
+    println!("DEBUG: Reçu session_id: {}", payload.session_id);
+    println!("DEBUG: Reçu signature: {}", payload.signature);
+    println!("DEBUG: Taille signature: {}", payload.signature.len());
     
     // 1. Récupération de la session et des infos (Inchangé)
     let row = sqlx::query(
