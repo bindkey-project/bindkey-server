@@ -9,10 +9,11 @@ use axum::{Json, extract::State, http::StatusCode};
 use chrono::{Duration, Utc};
 use uuid::Uuid;
 use base64::{Engine as _, engine::general_purpose};
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use std::convert::TryInto;
 use rand::{Rng, distr::Alphanumeric, rng};
 use sqlx::Row;
+use p256::ecdsa::{VerifyingKey, Signature, signature::Verifier};
+use p256::EncodedPoint;
 
 
 // ─────────────────────────────────────────────────────────────
@@ -75,7 +76,7 @@ fn random_string(len: usize) -> String {
 }
 fn random_challenge_hex() -> String {
     use rand::RngCore;
-    let mut bytes = [0u8; 32]; // 16 octets = 32 caractères hexadécimaux
+    let mut bytes = [0u8; 32]; // 16 octets =64 caractères hexadécimaux
     rand::rng().fill_bytes(&mut bytes);
     
     // Conversion en Hexa Majuscule
@@ -154,7 +155,7 @@ pub async fn verify_session(
     Json(payload): Json<VerifyRequest>,
 ) -> Result<Json<VerifyResponse>, (StatusCode, String)> {
     
-    // 1. Récupération de la session et des infos utilisateur/clé
+    // 1. Récupération de la session et des infos (Inchangé)
     let row = sqlx::query(
         r#"
         SELECT s.user_id, s.bindkey_id, s.auth_challenge,
@@ -173,33 +174,47 @@ pub async fn verify_session(
    
     let user_id: Uuid = row.get("user_id");
     let bindkey_id: Uuid = row.get("bindkey_id");
-    let challenge: String = row.get("auth_challenge"); // C'est ton Hexa Majuscule
+    let challenge: String = row.get("auth_challenge"); 
     let public_key_b64: String = row.get("public_key");
 
-    // 2. Décodage de la clé publique Ed25519 (Stockée en Base64 dans la DB)
+    // 2. Décodage de la clé publique ECDSA P-256
     let pub_key_bytes = general_purpose::STANDARD.decode(&public_key_b64)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Clé publique invalide".into()))?;
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Clé publique Base64 invalide".into()))?;
     
-    let pub_key_array: [u8; 32] = pub_key_bytes.try_into()
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Taille clé publique incorrecte".into()))?;
-    
-    let verifying_key = VerifyingKey::from_bytes(&pub_key_array)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Format clé Ed25519 invalide".into()))?;
+    // Pour ECDSA, on utilise from_encoded_point (supporte compressé/non-compressé SEC1)
+    let encoded_point = EncodedPoint::from_bytes(&pub_key_bytes)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Format SEC1 clé publique invalide".into()))?;
+        
+    let verifying_key = VerifyingKey::from_encoded_point(&encoded_point)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Point sur la courbe P-256 invalide".into()))?;
 
-    // 3. ADAPTATION : Décodage de la signature reçue en HEXADÉCIMAL
-    let sig_bytes = hex::decode(&payload.signature)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Format de signature Hexa invalide".into()))?;
-    
-    let sig_array: [u8; 64] = sig_bytes.try_into()
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Taille signature incorrecte (64 octets attendus)".into()))?;
-    
-    let signature = Signature::from_bytes(&sig_array);
+    // 3. Décodage de la signature avec gestion du padding
+let mut sig_hex = payload.signature.replace(" ", "");
 
+// Si la chaîne est impaire (ex: 127 chars), on ajoute un 0 au début pour la symétrie
+if sig_hex.len() % 2 != 0 {
+    sig_hex = format!("0{}", sig_hex);
+}
+
+let mut sig_bytes = hex::decode(&sig_hex)
+    .map_err(|_| (StatusCode::BAD_REQUEST, "Format Hexa invalide".into()))?;
+
+// Si on a moins de 64 octets (padding manquant), on complète par des zéros à GAUCHE
+if sig_bytes.len() < 64 {
+    let mut padded = vec![0u8; 64 - sig_bytes.len()];
+    padded.extend_from_slice(&sig_bytes);
+    sig_bytes = padded;
+}
+
+// Maintenant on peut créer la signature sans risque de crash
+let signature = Signature::from_slice(&sig_bytes)
+    .map_err(|_| (StatusCode::BAD_REQUEST, "Format de signature ECDSA invalide".into()))?;
     // 4. Vérification cryptographique
-    // On vérifie la signature contre les octets du texte HEX du challenge
+    // Note: p256::ecdsa réalise le hachage SHA-256 du message automatiquement 
+    // lors de l'appel à .verify() si on utilise les bons traits.
     match verifying_key.verify(challenge.as_bytes(), &signature) {
         Ok(_) => {
-            println!("🔒 Signature Ed25519 vérifiée avec succès");
+            println!("🔒 Signature ECDSA P-256 vérifiée avec succès");
         },
         Err(e) => {
             write_audit_log(
@@ -207,7 +222,7 @@ pub async fn verify_session(
                 Some(user_id), 
                 Some(bindkey_id), 
                 "VERIFY_FAILED", 
-                Some(format!("Signature invalide pour la session {}: {}", payload.session_id, e)), 
+                Some(format!("Signature ECDSA invalide pour la session {}: {}", payload.session_id, e)), 
                 AuditSeverity::ERROR
             ).await;
 
@@ -215,12 +230,11 @@ pub async fn verify_session(
         }
     }
 
-    // 5. Génération des tokens de session finale
+    // 5. Génération des tokens (Inchangé)
     let server_token = random_string(64);
     let local_token = random_string(64);
     let expires_at = Utc::now() + Duration::minutes(30);
 
-    // Mise à jour de la session : on retire le challenge (usage unique) et on met les tokens
     sqlx::query(
         "UPDATE sessions SET server_token=$1, local_token=$2, auth_challenge=NULL, expires_at=$3 WHERE id=$4"
     )
@@ -233,14 +247,7 @@ pub async fn verify_session(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // 6. Audit Log du succès
-    write_audit_log(
-        &state, 
-        Some(user_id), 
-        Some(bindkey_id), 
-        "VERIFY_SUCCESS", 
-        None, 
-        AuditSeverity::INFO
-    ).await;
+    write_audit_log(&state, Some(user_id), Some(bindkey_id), "VERIFY_SUCCESS", None, AuditSeverity::INFO).await;
 
     Ok(Json(VerifyResponse {
         server_token,

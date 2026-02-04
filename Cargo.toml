@@ -66,7 +66,8 @@ ed25519-dalek = "2.2.0"
 reqwest = { version = "0.13.1", features = ["json"] }
 axum-test = "16.4.0"
 sha2 = "0.10.9"
-
+p256 = { version = "0.13", features = ["ecdsa"] }
+ecdsa = "0.16"
 
 
 [lib]
@@ -87,6 +88,7 @@ path = "Tests/disk_tests.rs"
 [features]
 # On crée une feature "skip-auth"
 skip-auth = []
+
 
 [dev-dependencies]
 # On force l'activation de la feature pour tout ce qui est dans le dossier Tests/
