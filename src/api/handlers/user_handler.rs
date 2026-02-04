@@ -441,17 +441,18 @@ pub async fn delete_user(
 
     // Supprimer le user
     let res = sqlx::query("DELETE FROM users WHERE id = $1")
-        .bind(user_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
 
     if res.rows_affected() == 0 {
-        return Err((StatusCode::NOT_FOUND, "User not found".into()));
-    }
+    return Err((StatusCode::NOT_FOUND, "User not found".into()));
+}
 
     tx.commit().await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
 
     // Audit
     let _ = write_audit_log(
