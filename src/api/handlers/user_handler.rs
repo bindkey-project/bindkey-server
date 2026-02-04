@@ -409,3 +409,60 @@ pub async fn register_user_with_key(
     }))
 }
  
+//
+// ─────────────────────────────────────────────────────────────
+// DELETE /users/:id (ADMIN only)
+// ─────────────────────────────────────────────────────────────
+pub async fn delete_user(
+    Extension(auth): Extension<AuthUser>,
+    State(state): State<AppState>,
+    Path(user_id): Path<Uuid>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    // ✅ Admin only
+    if !require_role(&auth.role, &UserRole::ADMIN) {
+        return Err((StatusCode::FORBIDDEN, "ADMIN required".into()));
+    }
+
+    // (optionnel mais conseillé) empêcher l'admin de se supprimer lui-même
+    if auth.user_id == user_id {
+        return Err((StatusCode::BAD_REQUEST, "Cannot delete yourself".into()));
+    }
+
+    // Transaction (important si tu dois aussi supprimer bindkeys, etc.)
+    let mut tx = state.db.begin().await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // ⚠️ Si tu as une table bindkeys liée à users, supprime d'abord les bindkeys
+    sqlx::query("DELETE FROM bindkeys WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
+
+    // Supprimer le user
+    let res = sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
+
+    if res.rows_affected() == 0 {
+        return Err((StatusCode::NOT_FOUND, "User not found".into()));
+    }
+
+    tx.commit().await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Audit
+    let _ = write_audit_log(
+        &state,
+        Some(auth.user_id),
+        None,
+        "USER_DELETE",
+        Some(format!("target_user_id={user_id}")),
+        AuditSeverity::WARNING,
+    )
+    .await;
+
+    Ok(StatusCode::NO_CONTENT)
+}
