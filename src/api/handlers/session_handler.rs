@@ -75,7 +75,7 @@ fn random_string(len: usize) -> String {
 }
 fn random_challenge_hex() -> String {
     use rand::RngCore;
-    let mut bytes = [0u8; 16]; // 16 octets = 32 caractères hexadécimaux
+    let mut bytes = [0u8; 32]; // 16 octets = 32 caractères hexadécimaux
     rand::rng().fill_bytes(&mut bytes);
     
     // Conversion en Hexa Majuscule
