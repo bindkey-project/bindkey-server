@@ -1,62 +1,56 @@
-// src/api/handlers/mount_handler.rs
+// ─────────────────────────────────────────────────────────────
+// mount_handler.rs
 //
 // Gère le cycle de montage des volumes :
 //   - POST /mount         -> monter un volume
-//   - POST /unmount/:id   -> démonter un volume
+//   - POST /unmount/:id  -> démonter un volume
 //
 // Sécurité :
 //   - Seul le propriétaire, un utilisateur autorisé ou un ADMIN peut monter
 //   - Seul le propriétaire du mount ou un ADMIN peut démonter
 //
-// Audit (table audit_logs) :
+// Audit :
 //   - MOUNT / MOUNT_FAILED / MOUNT_FORBIDDEN
 //   - UNMOUNT / UNMOUNT_FAILED / UNMOUNT_FORBIDDEN / UNMOUNT_CONFLICT
-//
-// Modif principale :
-//    -> supprimer les `.await.ok()` qui cachent les erreurs d’écriture en base
-//    -> remplacer par `if let Err(e) = write_audit_log(...).await { eprintln!(...) }`
-//       pour être sûr que :
-//       - si ça écrit en DB -> OK
-//       - si ça n’écrit pas -> tu vois l’erreur SQL
-
+// ─────────────────────────────────────────────────────────────
+ 
 use axum::{
-    Extension,
-    Json,
+    Extension, Json,
     extract::{Path, State},
     http::StatusCode,
 };
-
+ 
 use uuid::Uuid;
-
+ 
 use crate::api::auth::{AuthUser, require_role};
 use crate::api::models::user::UserRole;
 use crate::db::AppState;
-
-// Audit : helper qui insère dans audit_logs
-use crate::api::audit::{write_audit_log, AuditSeverity};
-
+ 
+// Audit
+use crate::api::audit::{AuditSeverity, write_audit_log};
+ 
 //
 // ─────────────────────────────────────────────────────────────
 // Structures JSON
 // ─────────────────────────────────────────────────────────────
-
+ 
 /// Requête de montage d’un volume
 #[derive(serde::Deserialize)]
 pub struct MountRequest {
     pub volume_id: Uuid,
-
+ 
     /// Date d’expiration optionnelle du mount
     pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
-
+ 
 /// Réponse après montage
 #[derive(serde::Serialize)]
 pub struct MountResponse {
     pub mount_id: Uuid,
     pub message: String,
 }
-
-//
+ 
+ 
 // ─────────────────────────────────────────────────────────────
 // POST /mount
 // ─────────────────────────────────────────────────────────────
@@ -67,28 +61,25 @@ pub struct MountResponse {
 //  3) créer une entrée dans mounted_volumes
 //  4) écrire un audit log
 //
-
+ 
 pub async fn mount_volume(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
     Json(payload): Json<MountRequest>,
 ) -> Result<Json<MountResponse>, (StatusCode, String)> {
     let mount_id = Uuid::new_v4();
-
+ 
     // ────────────────
     // 1) Récupérer le propriétaire du volume
     // ────────────────
-    let owner_id = match sqlx::query_scalar::<_, Uuid>(
-        "SELECT owner_id FROM volumes WHERE id = $1"
-    )
-    .bind(payload.volume_id)
-    .fetch_optional(&state.db)
-    .await
+    let owner_id = match sqlx::query_scalar::<_, Uuid>("SELECT owner_id FROM volumes WHERE id = $1")
+        .bind(payload.volume_id)
+        .fetch_optional(&state.db)
+        .await
     {
         Ok(Some(id)) => id,
         Ok(None) => {
-            // Audit : volume inexistant
-            if let Err(e) = write_audit_log(
+            write_audit_log(
                 &state,
                 Some(auth.user_id),
                 None,
@@ -96,26 +87,23 @@ pub async fn mount_volume(
                 Some(format!("Volume not found: volume_id={}", payload.volume_id)),
                 AuditSeverity::WARNING,
             )
-            .await
-            {
-                eprintln!("❌ AUDIT LOG FAILED (MOUNT_FAILED volume not found): {e}");
-            }
-
+            .await;
+            
+ 
             return Err((StatusCode::NOT_FOUND, "Volume not found".into()));
         }
         Err(e) => {
-            // (Optionnel) audit ici aussi, mais attention à ne pas spammer
             return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")));
         }
     };
-
+ 
     // ────────────────
     // 2) Vérification des droits
     // ────────────────
     let is_owner = owner_id == auth.user_id;
     let is_admin = require_role(&auth.role, &UserRole::ADMIN);
     let mut has_permission = false;
-
+ 
     // Vérifier permissions explicites si nécessaire
     if !is_owner && !is_admin {
         let perm = sqlx::query_scalar::<_, i64>(
@@ -126,19 +114,18 @@ pub async fn mount_volume(
               AND grantee_id = $2
               AND (expires_at IS NULL OR expires_at > now())
             LIMIT 1
-            "#
+            "#,
         )
         .bind(payload.volume_id)
         .bind(auth.user_id)
         .fetch_optional(&state.db)
         .await;
-
+ 
         match perm {
             Ok(Some(_)) => has_permission = true,
             Ok(None) => {}
             Err(e) => {
-                // Audit : erreur pendant le check permission
-                if let Err(ae) = write_audit_log(
+                write_audit_log(
                     &state,
                     Some(auth.user_id),
                     None,
@@ -146,20 +133,16 @@ pub async fn mount_volume(
                     Some(format!("Permission check error: {e}")),
                     AuditSeverity::ERROR,
                 )
-                .await
-                {
-                    eprintln!("❌ AUDIT LOG FAILED (MOUNT_FAILED perm check): {ae}");
-                }
-
+                .await;
+                
+ 
                 return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")));
             }
         }
     }
-
-    // Pas de droits
+ 
     if !is_owner && !is_admin && !has_permission {
-        // Audit : tentative interdite
-        if let Err(e) = write_audit_log(
+        write_audit_log(
             &state,
             Some(auth.user_id),
             None,
@@ -167,14 +150,15 @@ pub async fn mount_volume(
             Some(format!("Access denied for volume_id={}", payload.volume_id)),
             AuditSeverity::WARNING,
         )
-        .await
-        {
-            eprintln!("❌ AUDIT LOG FAILED (MOUNT_FORBIDDEN): {e}");
-        }
-
-        return Err((StatusCode::FORBIDDEN, "Not allowed to mount this volume".into()));
+        .await;
+        
+ 
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Not allowed to mount this volume".into(),
+        ));
     }
-
+ 
     // ────────────────
     // 3) Insertion du mount
     // ────────────────
@@ -184,17 +168,16 @@ pub async fn mount_volume(
             id, volume_id, user_id, mounted_at, expires_at, unmounted_at
         )
         VALUES ($1, $2, $3, now(), $4, NULL)
-        "#
+        "#,
     )
     .bind(mount_id)
     .bind(payload.volume_id)
-    .bind(auth.user_id) // anti-spoof : on force le user_id depuis le token
+    .bind(auth.user_id) // anti-spoof
     .bind(payload.expires_at)
     .execute(&state.db)
     .await
     {
-        // Audit : échec d’insertion
-        if let Err(ae) = write_audit_log(
+        write_audit_log(
             &state,
             Some(auth.user_id),
             None,
@@ -202,36 +185,32 @@ pub async fn mount_volume(
             Some(format!("Insert failed: {e}")),
             AuditSeverity::ERROR,
         )
-        .await
-        {
-            eprintln!("❌ AUDIT LOG FAILED (MOUNT_FAILED insert): {ae}");
-        }
-
+        .await;
+        
+ 
         return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")));
     }
-
+ 
     // ────────────────
     // 4) Audit succès
     // ────────────────
-    if let Err(e) = write_audit_log(
+    write_audit_log(
         &state,
         Some(auth.user_id),
         None,
         "MOUNT",
-        Some(format!("Mounted volume_id={} mount_id={}", payload.volume_id, mount_id)),
+        Some(format!("Mounted volume_id={}", payload.volume_id)),
         AuditSeverity::INFO,
     )
-    .await
-    {
-        eprintln!("❌ AUDIT LOG FAILED (MOUNT): {e}");
-    }
-
+    .await;
+   
+ 
     Ok(Json(MountResponse {
         mount_id,
         message: "Mounted successfully".into(),
     }))
 }
-
+ 
 //
 // ─────────────────────────────────────────────────────────────
 // POST /unmount/:id
@@ -243,13 +222,12 @@ pub async fn mount_volume(
 //  3) vérifier qu’il n’est pas déjà démonté
 //  4) mettre à jour unmounted_at
 //
-
+ 
 pub async fn unmount_volume(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
     Path(mount_id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-
     // ────────────────
     // 1) Charger le mount
     // ────────────────
@@ -258,7 +236,7 @@ pub async fn unmount_volume(
         SELECT user_id, unmounted_at, volume_id
         FROM mounted_volumes
         WHERE id = $1
-        "#
+        "#,
     )
     .bind(mount_id)
     .fetch_optional(&state.db)
@@ -266,8 +244,7 @@ pub async fn unmount_volume(
     {
         Ok(Some(r)) => r,
         Ok(None) => {
-            // Audit : mount inexistant
-            if let Err(e) = write_audit_log(
+            write_audit_log(
                 &state,
                 Some(auth.user_id),
                 None,
@@ -275,29 +252,26 @@ pub async fn unmount_volume(
                 Some(format!("Mount not found: mount_id={}", mount_id)),
                 AuditSeverity::WARNING,
             )
-            .await
-            {
-                eprintln!("❌ AUDIT LOG FAILED (UNMOUNT_FAILED not found): {e}");
-            }
-
+            .await;
+           
+ 
             return Err((StatusCode::NOT_FOUND, "Mount not found".into()));
         }
         Err(e) => {
             return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")));
         }
     };
-
+ 
     let (mount_owner, unmounted_at, volume_id) = row;
-
+ 
     // ────────────────
     // 2) Vérification des droits
     // ────────────────
     let is_owner = mount_owner == auth.user_id;
     let is_admin = require_role(&auth.role, &UserRole::ADMIN);
-
+ 
     if !is_owner && !is_admin {
-        // Audit : tentative interdite
-        if let Err(e) = write_audit_log(
+        write_audit_log(
             &state,
             Some(auth.user_id),
             None,
@@ -305,77 +279,49 @@ pub async fn unmount_volume(
             Some(format!("Access denied for mount_id={}", mount_id)),
             AuditSeverity::WARNING,
         )
-        .await
-        {
-            eprintln!("❌ AUDIT LOG FAILED (UNMOUNT_FORBIDDEN): {e}");
-        }
-
-        return Err((StatusCode::FORBIDDEN, "Not allowed to unmount this mount".into()));
+        .await;
+       
+ 
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Not allowed to unmount this mount".into(),
+        ));
     }
-
+ 
     // ────────────────
     // 3) Déjà démonté ?
     // ────────────────
     if unmounted_at.is_some() {
-        // Audit : conflit (déjà démonté)
-        if let Err(e) = write_audit_log(
-            &state,
-            Some(auth.user_id),
-            None,
-            "UNMOUNT_CONFLICT",
-            Some(format!("Already unmounted: mount_id={} volume_id={}", mount_id, volume_id)),
-            AuditSeverity::WARNING,
-        )
-        .await
-        {
-            eprintln!("❌ AUDIT LOG FAILED (UNMOUNT_CONFLICT): {e}");
-        }
-
         return Err((StatusCode::CONFLICT, "Mount already unmounted".into()));
     }
-
+ 
     // ────────────────
-    // 4) Mise à jour unmounted_at
+    // 4) Mise à jour
     // ────────────────
-    if let Err(e) = sqlx::query(
-        "UPDATE mounted_volumes SET unmounted_at = now() WHERE id = $1"
-    )
-    .bind(mount_id)
-    .execute(&state.db)
-    .await
-    {
-        // Audit : échec update
-        if let Err(ae) = write_audit_log(
-            &state,
-            Some(auth.user_id),
-            None,
-            "UNMOUNT_FAILED",
-            Some(format!("Update failed: {e}")),
-            AuditSeverity::ERROR,
-        )
+    if let Err(e) = sqlx::query("UPDATE mounted_volumes SET unmounted_at = now() WHERE id = $1")
+        .bind(mount_id)
+        .execute(&state.db)
         .await
-        {
-            eprintln!("❌ AUDIT LOG FAILED (UNMOUNT_FAILED update): {ae}");
-        }
-
+    {
         return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")));
     }
-
+ 
     // ────────────────
     // 5) Audit succès
     // ────────────────
-    if let Err(e) = write_audit_log(
+    write_audit_log(
         &state,
         Some(auth.user_id),
         None,
         "UNMOUNT",
-        Some(format!("Unmounted mount_id={} volume_id={}", mount_id, volume_id)),
+        Some(format!(
+            "Unmounted mount_id={} volume_id={}",
+            mount_id, volume_id
+        )),
         AuditSeverity::INFO,
     )
-    .await
-    {
-        eprintln!("❌ AUDIT LOG FAILED (UNMOUNT): {e}");
-    }
-
+    .await;
+    
+ 
     Ok(StatusCode::NO_CONTENT)
 }

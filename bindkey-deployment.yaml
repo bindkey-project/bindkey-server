@@ -77,12 +77,17 @@ spec:
     metadata:
       labels:
         app: bindkey-api
+      annotations:
+        # Cette ligne permet de forcer le restart via kubectl rollout restart
+        # sans avoir à changer manuellement le SHA à chaque fois
+        kubectl.kubernetes.io/restartedAt: ""
     spec:
       imagePullSecrets:
         - name: ghcr-auth
       containers:
         - name: bindkey-api
-          image: ghcr.io/bindkey-project/bindkey-server/bindkey-server:v1
+          # Utilisation du tag latest pour automatiser les futurs pushs
+          image: ghcr.io/bindkey-project/bindkey-server/bindkey-server:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
@@ -92,6 +97,8 @@ spec:
                 secretKeyRef: { name: bindkey-db-secrets, key: dburl }
             - name: PWD_ENCRYPTION_KEY
               valueFrom: { secretKeyRef: { name: bindkey-pwd-keys, key: PWD_ENCRYPTION_KEY } }
+            - name: RUST_LOG
+              value: "debug"
 ---
 # --- 5. SERVICE EXTERNE : POUR L'INGRESS ---
 apiVersion: v1
