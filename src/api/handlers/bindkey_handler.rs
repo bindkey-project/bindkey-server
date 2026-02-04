@@ -9,20 +9,20 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
-
+ 
 // UUID : identifiants uniques (users, bindkeys, etc.)
 use uuid::Uuid;
-
+ 
 // AppState : contient le pool de connexion PostgreSQL
 use crate::db::AppState;
-
+ 
 // Modèle Bindkey + enum de statut
 use crate::api::models::bindkey::{Bindkey, BindkeyStatus};
-
+ 
 // Auth (RBAC)
 use crate::api::auth::{AuthUser, require_role};
 use crate::api::models::user::UserRole;
-
+ 
 //
 // ─────────────────────────────────────────────────────────────
 // 1) ENROLL — POST /bindkeys/enroll
@@ -32,7 +32,7 @@ use crate::api::models::user::UserRole;
 // Associer une BindKey biométrique à un utilisateur
 // → opération faite UNE SEULE FOIS lors de l’enrôlement
 //
-
+ 
 /// Données reçues depuis le client lors de l’enrôlement
 #[derive(serde::Deserialize)]
 pub struct EnrollBindkeyRequest {
@@ -41,14 +41,14 @@ pub struct EnrollBindkeyRequest {
     pub public_key: String,           // Clé publique (crypto)
     pub fingerprint_template: String, // Empreinte biométrique (hashée)
 }
-
+ 
 /// Réponse envoyée après enrôlement réussi
 #[derive(serde::Serialize)]
 pub struct EnrollBindkeyResponse {
     pub bindkey_id: Uuid, // ID généré côté serveur
     pub message: String,
 }
-
+ 
 /// Handler POST /bindkeys/enroll
 pub async fn enroll_bindkey(
     Extension(auth): Extension<AuthUser>, // Utilisateur authentifié (middleware)
@@ -59,13 +59,13 @@ pub async fn enroll_bindkey(
     if !require_role(&auth.role, &UserRole::ENROLLER) {
         return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
     }
-
+ 
     // Génération d’un UUID pour la nouvelle BindKey
-
+ 
     // 1. Génération d’un UUID pour la nouvelle BindKey
-
+ 
     let bindkey_id = Uuid::new_v4();
-
+ 
     // 2. Requête SQL d’insertion
     let query = r#"
         INSERT INTO bindkeys (
@@ -73,7 +73,7 @@ pub async fn enroll_bindkey(
         )
         VALUES ($1, $2, $3, $4, $5, 'ACTIVE')
     "#;
-
+ 
     // 3. Exécution SQL avec gestion fine des erreurs
     sqlx::query(query)
         .bind(bindkey_id)
@@ -93,7 +93,7 @@ pub async fn enroll_bindkey(
                         "Erreur : Cette BindKey est déjà associée à un utilisateur.".into(),
                     );
                 }
-
+ 
                 // Code 23503 = Violation de clé étrangère (L'utilisateur n'existe pas)
                 if db_error.code() == Some(std::borrow::Cow::Borrowed("23503")) {
                     return (
@@ -102,7 +102,7 @@ pub async fn enroll_bindkey(
                     );
                 }
             }
-
+ 
             // Si c'est une autre erreur inconnue, on garde le 500
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -110,14 +110,14 @@ pub async fn enroll_bindkey(
             )
             // --- FIN DE L'AMÉLIORATION ---
         })?;
-
+ 
     // 4. Réponse OK
     Ok(Json(EnrollBindkeyResponse {
         bindkey_id,
         message: "BindKey enrolled successfully".into(),
     }))
 }
-
+ 
 //
 // ─────────────────────────────────────────────────────────────
 // 2) GET — GET /bindkeys/:id
@@ -126,7 +126,7 @@ pub async fn enroll_bindkey(
 // Objectif :
 // Récupérer une BindKey précise par son UUID
 //
-
+ 
 pub async fn get_bindkey(
     State(state): State<AppState>,
     Path(id): Path<Uuid>, // UUID depuis l’URL
@@ -136,10 +136,10 @@ pub async fn get_bindkey(
         .fetch_one(&state.db)
         .await
         .map_err(|_| (StatusCode::NOT_FOUND, "BindKey not found".into()))?;
-
+ 
     Ok(Json(bindkey))
 }
-
+ 
 //
 // ─────────────────────────────────────────────────────────────
 // 3) GET — GET /users/:id/bindkeys
@@ -148,7 +148,7 @@ pub async fn get_bindkey(
 // Objectif :
 // Lister toutes les BindKeys associées à un utilisateur
 //
-
+ 
 pub async fn get_user_bindkeys(
     State(state): State<AppState>,
     Path(user_id): Path<Uuid>,
@@ -163,10 +163,10 @@ pub async fn get_user_bindkeys(
                 format!("Failed to fetch bindkeys: {}", e),
             )
         })?;
-
+ 
     Ok(Json(bindkeys))
 }
-
+ 
 //
 // ─────────────────────────────────────────────────────────────
 // 4) PATCH — PATCH /bindkeys/:id/status
@@ -176,13 +176,13 @@ pub async fn get_user_bindkeys(
 // Changer le statut d’une BindKey
 // (ACTIVE / LOST / BROKEN / RESET)
 //
-
+ 
 /// Body JSON attendu
 #[derive(serde::Deserialize)]
 pub struct UpdateBindkeyStatusRequest {
     pub status: BindkeyStatus,
 }
-
+ 
 pub async fn update_bindkey_status(
     Extension(auth): Extension<AuthUser>, // Utilisateur authentifié
     State(state): State<AppState>,
@@ -193,7 +193,7 @@ pub async fn update_bindkey_status(
     if !require_role(&auth.role, &UserRole::ENROLLER) {
         return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
     }
-
+ 
     let res = sqlx::query("UPDATE bindkeys SET status = $1 WHERE id = $2")
         .bind(payload.status)
         .bind(id)
@@ -205,15 +205,15 @@ pub async fn update_bindkey_status(
                 format!("Failed to update status: {}", e),
             )
         })?;
-
+ 
     // Si aucune ligne modifiée → BindKey inexistante
     if res.rows_affected() == 0 {
         return Err((StatusCode::NOT_FOUND, "BindKey not found".into()));
     }
-
+ 
     Ok(StatusCode::NO_CONTENT)
 }
-
+ 
 //
 // ─────────────────────────────────────────────────────────────
 // 5) RESET — POST /bindkeys/:id/reset
@@ -222,14 +222,14 @@ pub async fn update_bindkey_status(
 // Objectif :
 // Tracer une réinitialisation de BindKey (audit & sécurité)
 //
-
+ 
 #[derive(serde::Deserialize)]
 pub struct ResetBindkeyRequest {
     pub reset_type: String, // perte, corruption, effacement…
                             // ⚠️ performed_by supprimé côté sécurité :
                             // on utilise auth.user_id (sinon spoof possible)
 }
-
+ 
 pub async fn reset_bindkey(
     Extension(auth): Extension<AuthUser>, // Utilisateur authentifié
     State(state): State<AppState>,
@@ -240,9 +240,9 @@ pub async fn reset_bindkey(
     if !require_role(&auth.role, &UserRole::ENROLLER) {
         return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
     }
-
+ 
     let reset_id = Uuid::new_v4();
-
+ 
     sqlx::query(
         r#"
         INSERT INTO bindkey_resets (
@@ -266,6 +266,9 @@ pub async fn reset_bindkey(
             format!("Failed to reset bindkey: {}", e),
         )
     })?;
-
+ 
     Ok(StatusCode::NO_CONTENT)
 }
+ 
+ 
+ 

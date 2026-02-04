@@ -8,16 +8,16 @@ use axum::{
     extract::{State, Path, Query},
     http::StatusCode,
 };
-
+ 
 // UUID pour identifier de manière unique chaque disque
 use uuid::Uuid;
-
+ 
 // Accès à l’état global de l’application (contient la connexion PostgreSQL)
 use crate::db::AppState;
-
+ 
 // Modèle Disk correspondant à la table `disks`
 use crate::api::models::disk::Disk;
-
+ 
 // ─────────────────────────────────────────────────────────────
 // POST /disks/register
 // ─────────────────────────────────────────────────────────────
@@ -29,30 +29,30 @@ use crate::api::models::disk::Disk;
 // - Éviter les doublons via le numéro de série
 // - Associer plus tard des volumes chiffrés à ce disque
 // ─────────────────────────────────────────────────────────────
-
+ 
 // Données reçues depuis le client pour enregistrer un disque
 #[derive(serde::Deserialize)]
 pub struct RegisterDiskRequest {
     pub serial_number: String, // Numéro de série matériel du disque
     pub capacity_bytes: i64,   // Capacité totale du disque en octets
 }
-
+ 
 // Réponse envoyée après enregistrement
 #[derive(serde::Serialize)]
 pub struct RegisterDiskResponse {
     pub disk_id: Uuid,         // UUID généré côté serveur
     pub message: String,       // Message informatif
 }
-
+ 
 // Handler principal : POST /disks/register
 pub async fn register_disk(
     State(state): State<AppState>,              // Connexion DB partagée
     Json(payload): Json<RegisterDiskRequest>,   // JSON reçu depuis le client
 ) -> Result<Json<RegisterDiskResponse>, (StatusCode, String)> {
-
+ 
     // Génération d’un identifiant unique pour le disque
     let disk_id = Uuid::new_v4();
-
+ 
     // Insertion du disque dans la base PostgreSQL
     sqlx::query(
         r#"
@@ -69,21 +69,21 @@ pub async fn register_disk(
         StatusCode::INTERNAL_SERVER_ERROR,
         format!("SQL error: {e}")
     ))?;
-
+ 
     // Réponse retournée au client
     Ok(Json(RegisterDiskResponse {
         disk_id,
         message: "Disk registered".into(),
     }))
 }
-
+ 
 // ─────────────────────────────────────────────────────────────
 // GET /disks/:id
 // ─────────────────────────────────────────────────────────────
 // Objectif :
 // Récupérer les informations complètes d’un disque via son UUID
 // ─────────────────────────────────────────────────────────────
-
+ 
 pub async fn get_disk(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -99,10 +99,10 @@ pub async fn get_disk(
                 format!("SQL error: {other}"),
             ),
         })?;
-
+ 
     Ok(Json(disk))
 }
-
+ 
 // ─────────────────────────────────────────────────────────────
 // GET /disks?serial=...
 // ─────────────────────────────────────────────────────────────
@@ -113,13 +113,13 @@ pub async fn get_disk(
 // - Empêcher l’enregistrement multiple du même disque
 // - Vérifier l’existence avant création
 // ─────────────────────────────────────────────────────────────
-
+ 
 // Paramètre de requête : ?serial=XXXX
 #[derive(serde::Deserialize)]
 pub struct DiskSerialQuery {
     pub serial: String,
 }
-
+ 
 // Handler : GET /disks?serial=...
 pub async fn get_disk_by_serial(
     State(state): State<AppState>,
@@ -136,7 +136,9 @@ pub async fn get_disk_by_serial(
                 format!("SQL error: {other}"),
             ),
         })?;
-
+ 
     Ok(Json(disk))
 }
-
+ 
+ 
+ 

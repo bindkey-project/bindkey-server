@@ -14,7 +14,7 @@
 //   - VOLUME_FORBIDDEN (tentatives non autorisées)
 //
 // Note sécurité : ne JAMAIS logger encrypted_key (clé chiffrée).
-
+ 
 use axum::{
     Extension, Json,
     extract::{Path, State},
@@ -22,24 +22,24 @@ use axum::{
 };
 use sqlx::Row;
 use uuid::Uuid; //pour volume prepare
-
+ 
 use crate::api::audit::{AuditSeverity, write_audit_log};
 use crate::api::auth::{AuthUser, require_role};
 use crate::api::models::user::UserRole;
 use crate::api::models::volume::Volume;
 use crate::db::AppState;
-
+ 
 #[derive(serde::Deserialize)]
 pub struct PrepareVolumeRequest {
     pub public_key: String, // base64/PEM selon votre choix
 }
-
+ 
 #[derive(serde::Serialize)]
 pub struct PrepareVolumeResponse {
     pub exists: bool,
     pub volume_id: Uuid,
 }
-
+ 
 pub async fn prepare_volume(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
@@ -52,14 +52,14 @@ pub async fn prepare_volume(
         .fetch_one(&state.db)
         .await
         .map_err(|_| (StatusCode::NOT_FOUND, "BindKey not found".into()))?;
-
+ 
     let bindkey_id: Uuid = row.get("id");
     let owner_id: Uuid = row.get("user_id");
-
+ 
     if owner_id != auth.user_id {
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
-
+ 
     // 2) check volume existant lié à cette bindkey
     if let Some(existing_id) =
         sqlx::query_scalar::<_, Uuid>("SELECT id FROM volumes WHERE bindkey_id = $1 LIMIT 1")
@@ -73,18 +73,18 @@ pub async fn prepare_volume(
             volume_id: existing_id,
         }));
     }
-
+ 
     // On renvoie un UUID au client
     Ok(Json(PrepareVolumeResponse {
         exists: false,
         volume_id: Uuid::new_v4(),
     }))
 }
-
+ 
 // ─────────────────────────────────────────────────────────────
 // POST /volumes
 // ─────────────────────────────────────────────────────────────
-
+ 
 #[derive(serde::Deserialize)]
 pub struct CreateVolumeRequest {
     pub volume_id: Uuid,
@@ -93,13 +93,13 @@ pub struct CreateVolumeRequest {
     pub size_bytes: i64,
     pub encrypted_key: String,
 }
-
+ 
 #[derive(serde::Serialize)]
 pub struct CreateVolumeResponse {
     pub volume_id: Uuid,
     pub message: String,
 }
-
+ 
 pub async fn create_volume(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
@@ -111,7 +111,7 @@ pub async fn create_volume(
         .fetch_one(&state.db)
         .await
         .map_err(|_| (StatusCode::NOT_FOUND, "BindKey not found for user".into()))?;
-
+ 
     // INSERT
     sqlx::query(
         r#"
@@ -129,7 +129,7 @@ pub async fn create_volume(
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
-
+ 
     // Audit après succès
     write_audit_log(
         &state,
@@ -140,18 +140,17 @@ pub async fn create_volume(
         AuditSeverity::INFO,
     )
     .await;
-    
 
     Ok(Json(CreateVolumeResponse {
         volume_id: payload.volume_id,
         message: "Volume created".into(),
     }))
 }
-
+ 
 // ─────────────────────────────────────────────────────────────
 // GET /volumes/:id
 // ─────────────────────────────────────────────────────────────
-
+ 
 pub async fn get_volume(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
@@ -162,10 +161,10 @@ pub async fn get_volume(
         .fetch_one(&state.db)
         .await
         .map_err(|_| (StatusCode::NOT_FOUND, "Volume not found".into()))?;
-
+ 
     let is_owner = v.owner_id == auth.user_id;
     let is_admin = require_role(&auth.role, &UserRole::ADMIN);
-
+ 
     if !is_owner && !is_admin {
         // ✅ Audit tentative interdite
         write_audit_log(
@@ -180,14 +179,14 @@ pub async fn get_volume(
         
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
-
+ 
     Ok(Json(v))
 }
-
+ 
 // ─────────────────────────────────────────────────────────────
 // GET /users/:id/volumes
 // ─────────────────────────────────────────────────────────────
-
+ 
 pub async fn list_user_volumes(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
@@ -195,7 +194,7 @@ pub async fn list_user_volumes(
 ) -> Result<Json<Vec<Volume>>, (StatusCode, String)> {
     let is_self = auth.user_id == user_id;
     let is_admin = require_role(&auth.role, &UserRole::ADMIN);
-
+ 
     if !is_self && !is_admin {
         // ✅ Audit tentative interdite
         write_audit_log(
@@ -208,10 +207,9 @@ pub async fn list_user_volumes(
         )
         .await;
        
-
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
-
+ 
     let list = sqlx::query_as::<_, Volume>(
         "SELECT * FROM volumes WHERE owner_id = $1 ORDER BY created_at DESC",
     )
@@ -219,20 +217,20 @@ pub async fn list_user_volumes(
     .fetch_all(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
-
+ 
     Ok(Json(list))
 }
-
+ 
 // ─────────────────────────────────────────────────────────────
 // PATCH /volumes/:id
 // ─────────────────────────────────────────────────────────────
-
+ 
 #[derive(serde::Deserialize)]
 pub struct UpdateVolumeRequest {
     pub name: Option<String>,
     pub size_bytes: Option<i64>,
 }
-
+ 
 pub async fn update_volume(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
@@ -245,10 +243,10 @@ pub async fn update_volume(
         .fetch_one(&state.db)
         .await
         .map_err(|_| (StatusCode::NOT_FOUND, "Volume not found".into()))?;
-
+ 
     let is_owner = owner_id == auth.user_id;
     let is_admin = require_role(&auth.role, &UserRole::ADMIN);
-
+ 
     if !is_owner && !is_admin {
         write_audit_log(
             &state,
@@ -259,15 +257,14 @@ pub async fn update_volume(
             AuditSeverity::WARNING,
         )
         .await;
-      
-
+    
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
-
+ 
     // Sauver détails avant move
     let new_name = payload.name.clone();
     let new_size = payload.size_bytes;
-
+ 
     let res = sqlx::query(
         r#"
         UPDATE volumes
@@ -283,11 +280,11 @@ pub async fn update_volume(
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
-
+ 
     if res.rows_affected() == 0 {
         return Err((StatusCode::NOT_FOUND, "Volume not found".into()));
     }
-
+ 
     // ✅ Audit après succès
     write_audit_log(
         &state,
@@ -302,14 +299,13 @@ pub async fn update_volume(
     )
     .await;
    
-
     Ok(StatusCode::NO_CONTENT)
 }
-
+ 
 // ─────────────────────────────────────────────────────────────
 // DELETE /volumes/:id
 // ─────────────────────────────────────────────────────────────
-
+ 
 pub async fn delete_volume(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
@@ -321,10 +317,10 @@ pub async fn delete_volume(
         .fetch_one(&state.db)
         .await
         .map_err(|_| (StatusCode::NOT_FOUND, "Volume not found".into()))?;
-
+ 
     let is_owner = owner_id == auth.user_id;
     let is_admin = require_role(&auth.role, &UserRole::ADMIN);
-
+ 
     if !is_owner && !is_admin {
         write_audit_log(
             &state,
@@ -336,21 +332,20 @@ pub async fn delete_volume(
         )
         .await;
        
-
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
-
+ 
     // Delete
     let res = sqlx::query("DELETE FROM volumes WHERE id = $1")
         .bind(id)
         .execute(&state.db)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
-
+ 
     if res.rows_affected() == 0 {
         return Err((StatusCode::NOT_FOUND, "Volume not found".into()));
     }
-
+ 
     // ✅ Audit après succès
     write_audit_log(
         &state,
@@ -362,6 +357,5 @@ pub async fn delete_volume(
     )
     .await;
     
-
     Ok(StatusCode::NO_CONTENT)
 }
