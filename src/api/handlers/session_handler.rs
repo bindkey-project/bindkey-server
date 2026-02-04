@@ -158,7 +158,7 @@ pub async fn verify_session(
     println!("DEBUG: Reçu signature: {}", payload.signature);
     println!("DEBUG: Taille signature: {}", payload.signature.len());
     
-    // 1. Récupération de la session et des infos (Inchangé)
+    // 1. Récupération de la session et des infos
     let row = sqlx::query(
         r#"
         SELECT s.user_id, s.bindkey_id, s.auth_challenge,
@@ -178,13 +178,26 @@ pub async fn verify_session(
     let user_id: Uuid = row.get("user_id");
     let bindkey_id: Uuid = row.get("bindkey_id");
     let challenge: String = row.get("auth_challenge"); 
-    let public_key_b64: String = row.get("public_key");
+    let public_key_raw: String = row.get("public_key");
 
-    // 2. Décodage de la clé publique ECDSA P-256
-    let pub_key_bytes = general_purpose::STANDARD.decode(&public_key_b64)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Clé publique Base64 invalide".into()))?;
+    // 2. Décodage adaptatif de la clé publique (Hexa ou Base64)
+    let mut pub_key_bytes = if let Ok(hex_bytes) = hex::decode(public_key_raw.trim()) {
+        println!("DEBUG: Clé publique détectée comme HEXADÉCIMALE");
+        hex_bytes
+    } else {
+        println!("DEBUG: Tentative de décodage Base64 pour la clé publique");
+        general_purpose::STANDARD.decode(public_key_raw.trim())
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Clé publique: format inconnu (ni Hexa ni Base64)".into()))?
+    };
+
+    // Gestion automatique du préfixe SEC1 0x04 (Uncompressed)
+    if pub_key_bytes.len() == 64 {
+        println!("DEBUG: Ajout du header 0x04 à la clé publique (64 -> 65 octets)");
+        let mut prefixed = vec![0x04];
+        prefixed.extend_from_slice(&pub_key_bytes);
+        pub_key_bytes = prefixed;
+    }
     
-    // Pour ECDSA, on utilise from_encoded_point (supporte compressé/non-compressé SEC1)
     let encoded_point = EncodedPoint::from_bytes(&pub_key_bytes)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Format SEC1 clé publique invalide".into()))?;
         
@@ -192,29 +205,26 @@ pub async fn verify_session(
         .map_err(|_| (StatusCode::BAD_REQUEST, "Point sur la courbe P-256 invalide".into()))?;
 
     // 3. Décodage de la signature avec gestion du padding
-let mut sig_hex = payload.signature.replace(" ", "");
+    let mut sig_hex = payload.signature.replace(" ", "");
 
-// Si la chaîne est impaire (ex: 127 chars), on ajoute un 0 au début pour la symétrie
-if sig_hex.len() % 2 != 0 {
-    sig_hex = format!("0{}", sig_hex);
-}
+    if sig_hex.len() % 2 != 0 {
+        sig_hex = format!("0{}", sig_hex);
+    }
 
-let mut sig_bytes = hex::decode(&sig_hex)
-    .map_err(|_| (StatusCode::BAD_REQUEST, "Format Hexa invalide".into()))?;
+    let mut sig_bytes = hex::decode(&sig_hex)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Format Hexa de la signature invalide".into()))?;
 
-// Si on a moins de 64 octets (padding manquant), on complète par des zéros à GAUCHE
-if sig_bytes.len() < 64 {
-    let mut padded = vec![0u8; 64 - sig_bytes.len()];
-    padded.extend_from_slice(&sig_bytes);
-    sig_bytes = padded;
-}
+    if sig_bytes.len() < 64 {
+        let mut padded = vec![0u8; 64 - sig_bytes.len()];
+        padded.extend_from_slice(&sig_bytes);
+        sig_bytes = padded;
+    }
 
-// Maintenant on peut créer la signature sans risque de crash
-let signature = Signature::from_slice(&sig_bytes)
-    .map_err(|_| (StatusCode::BAD_REQUEST, "Format de signature ECDSA invalide".into()))?;
+    let signature = Signature::from_slice(&sig_bytes)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Format de signature ECDSA invalide".into()))?;
+
     // 4. Vérification cryptographique
-    // Note: p256::ecdsa réalise le hachage SHA-256 du message automatiquement 
-    // lors de l'appel à .verify() si on utilise les bons traits.
+    // On vérifie contre les bytes du challenge (ASCII)
     match verifying_key.verify(challenge.as_bytes(), &signature) {
         Ok(_) => {
             println!("🔒 Signature ECDSA P-256 vérifiée avec succès");
@@ -233,7 +243,7 @@ let signature = Signature::from_slice(&sig_bytes)
         }
     }
 
-    // 5. Génération des tokens (Inchangé)
+    // 5. Génération des tokens finaux
     let server_token = random_string(64);
     let local_token = random_string(64);
     let expires_at = Utc::now() + Duration::minutes(30);
