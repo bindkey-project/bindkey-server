@@ -10,24 +10,50 @@ BindKey - Master Project - Server Code Repository
 
 Dans le dossier du projet :
 
-```bash
 docker compose up -d
-
-route sessions/login envoyer juste caractere aléatoire pour la cle  verifiaction , garder le string genere en memoire pour la verification GOOD 
-route sessions/verify : objectif verifier que c'est la bonne bindkey , verifier signature clé bindkey avec la clé public stocké bdd , si ok (le string aléatoire envoyer==dechifrement avec la clé public du bindkey ) envoyer token de session definitive pour faire les routes , nom user + roles , pour etre sur que c'est bien la meme personne avec le string on recoit le email de la personne GOOD 
-
-
-
-mdp stockage : 
--argon 2 avec hash+salt
--chiffrer le mdp avec AES (clé symetrique doit pas etre stocké dans la BDD)
--stocker la clé symetrique dans un secret kubernetes et/ou dans parametres d'environnement 
-GOOD 
 
 sudo -E kubectl port-forward --address 0.0.0.0 -n ingress-nginx service/ingress-nginx-controller 443:443
 # Si tu utilises l'Ingress Nginx standard
 kubectl logs -f -l app.kubernetes.io/name=ingress-nginx -n ingress-nginx
 
 kubectl exec -it bindkey-deployment-85d87f9556-j4fzn -c bindkey-db -- psql -U admin_bindkey -d bindkey
+kubectl exec -it bindkey-db-1 -c postgres -- psql -U postgres -d bindkey
+
+bindkey=# INSERT INTO users (
+    id, 
+    first_name, 
+    last_name, 
+    email, 
+    role, 
+    status, 
+    recovery_code_hash, 
+    password_hash
+) VALUES (
+    '550e8400-e29b-41d4-a716-446655440000', 
+    'Admin', 
+    'BindKey', 
+    'admin@bindkey.local', 
+    'ADMIN', 
+    'ACTIVE', 
+    'recovery_dummy_hash', 
+    'DQutzqetJxk4qAPb/Pb/S3saLW8rOI+DRh5KfJWsCZ3nJ1hnHVMH2MZ724khOdvN9xaD0jmtCWOuf2dK9nxk0r0S4zmDpM3NfqIRIh3lGHx0hmweArh+zegi6RbPNccrjKrNP5JM27NP0wtvACkOaAaZ2JbkcKboVUecmMM='
+);
+INSERT 0 1
+bindkey=# INSERT INTO bindkeys (
+    id, 
+    user_id, 
+    bindkey_uid, 
+    fingerprint_template, 
+    public_key, 
+    status
+) VALUES (
+    '660f9511-f30c-52e5-b827-557766551111', 
+    '550e8400-e29b-41d4-a716-446655440000', 
+    'BK-ADMIN-001', 
+    'template_data_biometric', 
+    'ecdsa_public_key_content', 
+    'ACTIVE'
+);
+
 
 la signature sans le préfixe 0x, juste les caractères de 0-9 et A-F

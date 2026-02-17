@@ -1,75 +1,29 @@
-# --- 1. STOCKAGE ---
-apiVersion: v1
-kind: PersistentVolumeClaim
+# --- 1. LE CLUSTER POSTGRESQL (CloudNativePG) ---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
 metadata:
-  name: bindkey-db-pvc
+  name: bindkey-db
 spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 1Gi
+  instances: 1 
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.1
+  imagePullSecrets:
+    - name: ghcr-auth
+  storage:
+    size: 1Gi
+  bootstrap:
+    initdb:
+      database: bindkey
+      owner: admin_bindkey 
+      secret:
+        name: bindkey-db-secrets
 ---
-# --- 2. DÉPLOIEMENT : LA BASE DE DONNÉES ---
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: bindkey-db-deployment
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: bindkey-db
-  template:
-    metadata:
-      labels:
-        app: bindkey-db
-    spec:
-      imagePullSecrets:     
-        - name: ghcr-auth
-      containers:
-        - name: postgres
-          image: ghcr.io/bindkey-project/bindkey-server/bindkey-db:latest
-          args: ["postgres"]
-          ports:
-            - containerPort: 5432
-          env:
-            - name: POSTGRES_USER
-              valueFrom:
-                secretKeyRef: { name: bindkey-db-secrets, key: username }
-            - name: POSTGRES_PASSWORD
-              valueFrom: { secretKeyRef: { name: bindkey-db-secrets, key: password } }
-            - name: POSTGRES_DB
-              valueFrom: { secretKeyRef: { name: bindkey-db-secrets, key: dbname } }
-            - name: PGDATA
-              value: /var/lib/postgresql/data/pgdata
-          volumeMounts:
-            - name: db-storage
-              mountPath: /var/lib/postgresql/data
-      volumes:
-        - name: db-storage
-          persistentVolumeClaim:
-            claimName: bindkey-db-pvc
----
-# --- 3. SERVICE INTERNE : POUR LA DB ---
-apiVersion: v1
-kind: Service
-metadata:
-  name: bindkey-db-service
-spec:
-  selector:
-    app: bindkey-db
-  ports:
-    - port: 5432
-      targetPort: 5432
----
-# --- 4. DÉPLOIEMENT : L'API RUST ---
+# --- 2. L'API RUST ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: bindkey-api-deployment
 spec:
-  replicas: 1
+  replicas: 1 # Un seul Pod API
   selector:
     matchLabels:
       app: bindkey-api
@@ -77,18 +31,11 @@ spec:
     metadata:
       labels:
         app: bindkey-api
-      annotations:
-        # Cette ligne permet de forcer le restart via kubectl rollout restart
-        # sans avoir à changer manuellement le SHA à chaque fois
-
-        kubectl.kubernetes.io/restartedAt: ""
-
     spec:
       imagePullSecrets:
         - name: ghcr-auth
       containers:
         - name: bindkey-api
-          # Utilisation du tag latest pour automatiser les futurs pushs
           image: ghcr.io/bindkey-project/bindkey-server/bindkey-server:latest
           imagePullPolicy: Always
           ports:
@@ -102,7 +49,7 @@ spec:
             - name: RUST_LOG
               value: "debug"
 ---
-# --- 5. SERVICE EXTERNE : POUR L'INGRESS ---
+# --- 3. SERVICE POUR L'INGRESS ---
 apiVersion: v1
 kind: Service
 metadata:
