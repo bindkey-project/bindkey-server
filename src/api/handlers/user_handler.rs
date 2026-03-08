@@ -373,7 +373,7 @@ pub async fn register_user_with_key(
     sqlx::query(
         r#"
         INSERT INTO bindkeys (
-            id, user_id, bindkey_uid, fingerprint_template, public_key, status
+            id, user_id, bindkey_uid, public_key, status
         VALUES ($1, $2, $3, $4, $5, $6::text::bindkey_status)
         "#
     )
