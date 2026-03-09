@@ -370,10 +370,11 @@ pub async fn register_user_with_key(
  
     // 6. INSERT BINDKEY
     // On insère "NULL" en dur pour fingerprint_template
-    sqlx::query(
+  sqlx::query(
         r#"
         INSERT INTO bindkeys (
-            id, user_id, bindkey_uid, fingerprint_template, public_key, status)
+            id, user_id, bindkey_uid, fingerprint_template, public_key, status
+        ) -- Assure-toi que cette parenthèse est bien là et seule
         VALUES ($1, $2, $3, $4, $5, $6::text::bindkey_status)
         "#
     )
