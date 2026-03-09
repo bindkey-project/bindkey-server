@@ -109,6 +109,7 @@ pub async fn mount_volume(
             FROM volume_permissions
             WHERE volume_id = $1
               AND grantee_id = $2
+              AND status = 'ACTIVE'
               AND (expires_at IS NULL OR expires_at > now())
             LIMIT 1
             "#,

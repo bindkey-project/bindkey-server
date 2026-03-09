@@ -32,6 +32,8 @@ pub struct VolumePermission {
     /// Niveau d’accès : READ | READ_WRITE
     pub permission: PermissionLevel,
 
+    pub status: PermissionStatus,
+
     /// Expiration du partage (nullable).
     /// - None => partage permanent
     /// - Some(ts) => accès limité dans le temps
@@ -44,15 +46,26 @@ pub struct VolumePermission {
     ///
     /// Optionnel si tu autorises des partages "système" (ou migrations).
     pub created_by: Option<Uuid>,
+
+    pub revoked_at: Option<DateTime<Utc>>,
 }
 
 /// ENUM SQL : permission_level
 ///
 /// Exemple SQL :
 ///   CREATE TYPE permission_level AS ENUM ('READ', 'READ_WRITE');
+
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "permission_level", rename_all = "UPPERCASE")]
 pub enum PermissionLevel {
     READ,
-    ReadWrite,
+    #[sqlx(rename = "READ_WRITE")]
+    READ_WRITE,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "permission_status", rename_all = "UPPERCASE")]
+pub enum PermissionStatus {
+    ACTIVE,
+    REVOKED,
 }

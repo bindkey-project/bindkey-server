@@ -26,12 +26,6 @@ pub struct Volume {
     /// Identifiant unique du volume (PK).
     pub id: Uuid,
 
-    /// BindKey associée au volume (si applicable).
-    ///
-    /// - Some(bindkey_id) : volume lié à une BindKey spécifique
-    /// - None : volume non lié ou lien historique supprimé
-    pub bindkey_id: Option<Uuid>,
-
     /// Utilisateur propriétaire du volume.
     ///
     /// Si l'utilisateur est supprimé, les volumes associés doivent l'être aussi
@@ -50,14 +44,6 @@ pub struct Volume {
     ///
     /// Exemple : 1 Go = 1_073_741_824 bytes.
     pub size_bytes: i64,
-
-    /// Clé symétrique du volume, CHIFFRÉE.
-    ///
-    /// ⚠️ IMPORTANT :
-    /// - Ne contient JAMAIS la clé brute.
-    /// - Stockée chiffrée avec la clé publique BindKey ou une clé maître serveur.
-    /// - La clé déchiffrée n’est renvoyée qu’après validation cryptographique.
-    pub encrypted_key: String,
 
     /// Date de création.
     pub created_at: DateTime<Utc>,

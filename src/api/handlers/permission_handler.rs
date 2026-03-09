@@ -227,13 +227,19 @@ pub async fn revoke_permission(
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
  
-    // 4) Delete permission
-    sqlx::query("DELETE FROM volume_permissions WHERE id = $1")
-        .bind(permission_id)
-        .execute(&state.db)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
- 
+    // 4) Update permission
+    sqlx::query(
+    r#"
+    UPDATE volume_permissions
+    SET status = 'REVOKED', revoked_at = now()
+    WHERE id = $1
+    "#
+    )
+    .bind(permission_id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
+
     // 5) Audit après DELETE OK
     let _ = write_audit_log(
         &state,

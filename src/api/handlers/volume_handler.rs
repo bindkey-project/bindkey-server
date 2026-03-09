@@ -20,7 +20,6 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
-use sqlx::Row;
 use uuid::Uuid; //pour volume prepare
  
 use crate::api::audit::{AuditSeverity, write_audit_log};
@@ -30,9 +29,7 @@ use crate::api::models::volume::Volume;
 use crate::db::AppState;
  
 #[derive(serde::Deserialize)]
-pub struct PrepareVolumeRequest {
-    pub public_key: String, // base64/PEM selon votre choix
-}
+pub struct PrepareVolumeRequest {}
  
 #[derive(serde::Serialize)]
 pub struct PrepareVolumeResponse {
@@ -41,40 +38,11 @@ pub struct PrepareVolumeResponse {
 }
  
 pub async fn prepare_volume(
-    Extension(auth): Extension<AuthUser>,
-    State(state): State<AppState>,
-    Json(payload): Json<PrepareVolumeRequest>,
+    Extension(_auth): Extension<AuthUser>,
+    State(_state): State<AppState>,
+    Json(_payload): Json<PrepareVolumeRequest>,
 ) -> Result<Json<PrepareVolumeResponse>, (StatusCode, String)> {
-    // 1) retrouver la bindkey via la public_key + vérifier ownership
-    // (on récupère id + user_id en une seule requête)
-    let row = sqlx::query("SELECT id, user_id FROM bindkeys WHERE public_key = $1")
-        .bind(&payload.public_key)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|_| (StatusCode::NOT_FOUND, "BindKey not found".into()))?;
- 
-    let bindkey_id: Uuid = row.get("id");
-    let owner_id: Uuid = row.get("user_id");
- 
-    if owner_id != auth.user_id {
-        return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
-    }
- 
-    // 2) check volume existant lié à cette bindkey
-    if let Some(existing_id) =
-        sqlx::query_scalar::<_, Uuid>("SELECT id FROM volumes WHERE bindkey_id = $1 LIMIT 1")
-            .bind(bindkey_id)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?
-    {
-        return Ok(Json(PrepareVolumeResponse {
-            exists: true,
-            volume_id: existing_id,
-        }));
-    }
- 
-    // On renvoie un UUID au client
+
     Ok(Json(PrepareVolumeResponse {
         exists: false,
         volume_id: Uuid::new_v4(),
@@ -105,31 +73,46 @@ pub async fn create_volume(
     State(state): State<AppState>,
     Json(payload): Json<CreateVolumeRequest>,
 ) -> Result<Json<CreateVolumeResponse>, (StatusCode, String)> {
-    // 1 user = 1 bindkey : retrouver bindkey_id
-    let bindkey_id: Uuid = sqlx::query_scalar("SELECT id FROM bindkeys WHERE user_id = $1")
-        .bind(auth.user_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|_| (StatusCode::NOT_FOUND, "BindKey not found for user".into()))?;
  
-    // INSERT
+    // INSERT dans volumes et volume_keys
+    let mut tx = state.db.begin().await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
+
     sqlx::query(
         r#"
-        INSERT INTO volumes (id, owner_id, bindkey_id, disk_id, name, size_bytes, encrypted_key)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        "#,
+        INSERT INTO volumes (id, owner_id, disk_id, name, size_bytes)
+        VALUES ($1, $2, $3, $4, $5)
+        "#
     )
     .bind(payload.volume_id)
     .bind(auth.user_id)
-    .bind(bindkey_id)
     .bind(payload.disk_id)
     .bind(&payload.name)
     .bind(payload.size_bytes)
-    .bind(&payload.encrypted_key)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
- 
+
+    let volume_key_id = Uuid::new_v4();
+
+    sqlx::query(
+        r#"
+        INSERT INTO volume_keys (id, volume_id, encrypted_key, key_version, is_active)
+        VALUES ($1, $2, $3, $4, $5)
+        "#
+    )
+    .bind(volume_key_id)
+    .bind(payload.volume_id)
+    .bind(&payload.encrypted_key)
+    .bind(1_i32)
+    .bind(true)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
+
+    tx.commit().await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
+
     // Audit après succès
     write_audit_log(
         &state,
