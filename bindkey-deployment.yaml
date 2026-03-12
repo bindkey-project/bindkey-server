@@ -23,7 +23,7 @@ kind: Deployment
 metadata:
   name: bindkey-api-deployment
 spec:
-  replicas: 1 # Un seul Pod API
+  replicas: 1 
   selector:
     matchLabels:
       app: bindkey-api
@@ -49,14 +49,16 @@ spec:
             - name: RUST_LOG
               value: "debug"
 ---
-# --- 3. SERVICE POUR L'INGRESS ---
+# --- 3. SERVICE PERMANENT (NODEPORT) ---
 apiVersion: v1
 kind: Service
 metadata:
   name: bindkey-service
 spec:
+  type: NodePort # Permet l'accès externe permanent
   selector:
     app: bindkey-api
   ports:
-    - port: 8080
-      targetPort: 8080
+    - port: 8080       # Port interne au cluster
+      targetPort: 8080 # Port sur lequel ton API écoute dans le container
+      nodePort: 30080  # Port fixe sur l'IP de ton Mac Debian
