@@ -60,7 +60,7 @@ pub struct VolumePermission {
 pub enum PermissionLevel {
     READ,
     #[sqlx(rename = "READ_WRITE")]
-    READ_WRITE,
+    ReadWrite,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
