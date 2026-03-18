@@ -16,6 +16,13 @@ spec:
       owner: admin_bindkey 
       secret:
         name: bindkey-db-secrets
+managed:
+    roles:
+      - name: admin_bindkey
+        ensure: present
+        login: true
+        passwordSecret:
+          name: bindkey-db-secrets
 ---
 # --- 2. L'API RUST ---
 apiVersion: apps/v1
