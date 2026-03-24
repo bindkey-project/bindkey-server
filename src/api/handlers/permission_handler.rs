@@ -41,7 +41,18 @@ pub struct ShareVolumeResponse {
     pub permission_id: Uuid,
     pub message: String,
 }
- 
+
+#[derive(serde::Serialize, sqlx::FromRow)]
+pub struct MyGrantResponse {
+    pub volume_id: Uuid,
+    pub disk_id: Uuid,
+    pub name: String,
+    pub permission: PermissionLevel,
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub encrypted_key: String,
+    pub key_version: i32,
+}
+
 pub async fn share_volume(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
@@ -173,7 +184,6 @@ pub async fn list_volume_permissions(
     Ok(Json(list))
 }
  
-//
 // ─────────────────────────────────────────────────────────────
 // DELETE /permissions/:id
 // ─────────────────────────────────────────────────────────────
@@ -230,11 +240,11 @@ pub async fn revoke_permission(
     // 4) Update permission
     sqlx::query(
     r#"
-    UPDATE volume_permissions
-    SET status = 'REVOKED', revoked_at = now()
-    WHERE id = $1
-    "#
-    )
+        UPDATE volume_permissions
+        SET status = 'REVOKED', revoked_at = now()
+        WHERE id = $1
+        "#
+        )
     .bind(permission_id)
     .execute(&state.db)
     .await
@@ -257,4 +267,93 @@ pub async fn revoke_permission(
 }
  
  
- 
+// ─────────────────────────────────────────────────────────────
+// GET /me/grants
+// Retourne :
+//   - les volumes possédés par l'utilisateur (owner)
+//   - les volumes partagés (permissions)
+// ─────────────────────────────────────────────────────────────
+pub async fn get_my_grants(
+    Extension(auth): Extension<AuthUser>,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<MyGrantResponse>>, (StatusCode, String)> {
+
+    // ─────────────────────────────
+    // 1) Récupérer les volumes OWNÉS
+    // ─────────────────────────────
+    // L'utilisateur est propriétaire → permission = READ_WRITE
+    let mut grants = sqlx::query_as::<_, MyGrantResponse>(
+        r#"
+        SELECT
+            v.id AS volume_id,
+            v.disk_id,
+            v.name,
+            'READ_WRITE'::text::permission_level AS permission, -- owner = full access
+            NULL AS expires_at, -- pas d'expiration pour le propriétaire
+            vk.encrypted_key,
+            vk.key_version
+        FROM volumes v
+        JOIN volume_keys vk
+            ON vk.volume_id = v.id
+        WHERE v.owner_id = $1
+          AND vk.is_active = TRUE
+        "#
+    )
+    .bind(auth.user_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error (owner): {e}")))?;
+
+    // ─────────────────────────────
+    // 2) Récupérer les volumes PARTAGÉS
+    // ─────────────────────────────
+    let mut shared = sqlx::query_as::<_, MyGrantResponse>(
+        r#"
+        SELECT
+            v.id AS volume_id,
+            v.disk_id,
+            v.name,
+            vp.permission,
+            vp.expires_at,
+            vk.encrypted_key,
+            vk.key_version
+        FROM volume_permissions vp
+        JOIN volumes v
+            ON v.id = vp.volume_id
+        JOIN volume_keys vk
+            ON vk.volume_id = v.id
+        WHERE vp.grantee_id = $1
+          AND vp.status = 'ACTIVE'
+          AND (vp.expires_at IS NULL OR vp.expires_at > now())
+          AND vk.is_active = TRUE
+        ORDER BY vp.created_at DESC
+        "#
+    )
+    .bind(auth.user_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error (shared): {e}")))?;
+
+    // ─────────────────────────────
+    // 3) Fusionner les deux listes
+    // ─────────────────────────────
+    grants.append(&mut shared);
+
+    // ─────────────────────────────
+    // 4) Audit
+    // ─────────────────────────────
+    write_audit_log(
+        &state,
+        Some(auth.user_id),
+        None,
+        "MY_GRANTS_READ",
+        Some(format!("grants_count={}", grants.len())),
+        AuditSeverity::INFO,
+    )
+    .await;
+
+    // ─────────────────────────────
+    // 5) Retour
+    // ─────────────────────────────
+    Ok(Json(grants))
+}

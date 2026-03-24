@@ -8,6 +8,7 @@ use axum::{
 // Import des handlers liés au partage et aux permissions
 // Ces handlers contiennent la logique métier de contrôle d’accès
 use crate::api::handlers::permission_handler::{
+    get_my_grants,
     list_volume_permissions, // GET  /volumes/:id/permissions
     revoke_permission,       // DELETE /permissions/:id
     share_volume,            // POST /volumes/:id/share
@@ -44,4 +45,6 @@ pub fn permission_routes() -> Router<crate::db::AppState> {
         // → coupure immédiate de l’accès
         // ─────────────────────────────────────────
         .route("/permissions/:id", delete(revoke_permission))
+
+        .route("/me/grants", get(get_my_grants))
 }
