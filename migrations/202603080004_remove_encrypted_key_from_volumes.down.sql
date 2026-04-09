@@ -1,0 +1,2 @@
+ALTER TABLE volumes
+ADD COLUMN encrypted_key TEXT NOT NULL DEFAULT '';

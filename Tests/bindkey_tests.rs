@@ -265,6 +265,137 @@ async fn test_get_user_bindkeys_list_content() {
     assert!(!list.is_empty(), "La liste ne devrait pas être vide !");
     assert_eq!(list[0]["bindkey_uid"], bindkey_uid);
 }
+
+// ─────────────────────────────────────────────────────────────
+// Test 5 : GET /me/grants
+// Vérifie que l'utilisateur récupère bien ses accès
+// ─────────────────────────────────────────────────────────────
+#[tokio::test]
+async fn test_get_my_grants_basic() {
+    let app = create_app_instance().await;
+
+    // 1) Créer un utilisateur
+    let user_email = format!("grants_test_{}@bindkey.io", Uuid::new_v4());
+    let create_user_json = json!({
+        "first_name": "Grant",
+        "last_name": "Tester",
+        "email": user_email,
+        "password": "password123"
+    });
+
+    let user_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/users")
+                .header("Content-Type", "application/json")
+                .body(Body::from(serde_json::to_vec(&create_user_json).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert!(user_res.status().is_success(), "Erreur création user");
+
+    let body_bytes = ax_body::to_bytes(user_res.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let user_data: Value = serde_json::from_slice(&body_bytes).unwrap();
+    let _user_id = user_data["id"].as_str().expect("Pas d'ID user");
+
+    // 2) Créer un disque
+    let serial = format!("SN-GRANTS-{}", Uuid::new_v4());
+    let disk_payload = json!({
+        "serial_number": serial,
+        "capacity_bytes": 1_000_000_i64
+    });
+
+    let disk_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/disks/register")
+                .header("Content-Type", "application/json")
+                .body(Body::from(serde_json::to_vec(&disk_payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert!(disk_res.status().is_success(), "Erreur création disque");
+
+    let body_bytes = ax_body::to_bytes(disk_res.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let disk_data: Value = serde_json::from_slice(&body_bytes).unwrap();
+    let disk_id = disk_data["disk_id"].as_str().expect("Pas d'ID disque");
+
+    // 3) Créer un volume
+    let volume_id = Uuid::new_v4();
+    let create_volume_json = json!({
+        "volume_id": volume_id,
+        "disk_id": disk_id,
+        "name": "VolumeGrantTest",
+        "size_bytes": 4096,
+        "encrypted_key": "encrypted_test_key_123"
+    });
+
+    let volume_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/volumes")
+                .header("Content-Type", "application/json")
+                .body(Body::from(serde_json::to_vec(&create_volume_json).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let status = volume_res.status();
+        let body_bytes = ax_body::to_bytes(volume_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body_str = String::from_utf8_lossy(&body_bytes);
+
+        println!("--- TEST CRÉATION VOLUME ---");
+        println!("Statut : {}", status);
+        println!("Body : {}", body_str);
+
+        assert!(status.is_success(), "Erreur création volume: {}", body_str);
+
+    // 4) Appeler /me/grants
+    let grants_res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/me/grants")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = grants_res.status();
+    let body_bytes = ax_body::to_bytes(grants_res.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body_str = String::from_utf8_lossy(&body_bytes);
+
+    println!("\n--- TEST : GET /me/grants ---");
+    println!("Statut : {}", status);
+    println!("Réponse : {}", body_str);
+
+    assert!(status.is_success(), "Le endpoint /me/grants a échoué");
+
+    let grants: Vec<Value> =
+        serde_json::from_slice(&body_bytes).expect("Body n'est pas une liste JSON");
+
+    assert!(!grants.is_empty(), "Aucun grant retourné");
+}
  
 /*async fn setup_test_user_with_key(pool: &sqlx::PgPool, email: &str, public_key_b64: &str) {
     // 1. Configuration de l'environnement de sécurité (AES)

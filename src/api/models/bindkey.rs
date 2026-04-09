@@ -32,13 +32,6 @@ pub struct Bindkey {
     /// Identifiant unique interne du périphérique (USB/BIO).
     pub bindkey_uid: String,
 
-    /// Empreinte biométrique (template/hash).
-    ///
-    /// ⚠️ Si ta colonne SQL s’appelle `fingerprint_hash` et pas
-    /// `fingerprint_template`, ajoute :
-    /// `#[sqlx(rename = "fingerprint_hash")]`
-    pub fingerprint_template: String,
-
     /// Clé publique associée (signature / chiffrement).
     pub public_key: String,
 
