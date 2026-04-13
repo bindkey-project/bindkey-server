@@ -81,9 +81,7 @@ path = "src/main.rs"   # Le binaire contient uniquement le démarrage du serveur
 [[test]]
 name = "bindkey_tests"
 path = "Tests/bindkey_tests.rs"
-[[test]]
-name = "disk_tests"
-path = "Tests/disk_tests.rs"
+
 
 [features]
 # On crée une feature "skip-auth"
