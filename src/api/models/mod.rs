@@ -4,8 +4,7 @@ pub mod user;
 // Modèle pour la table `bindkeys` (clés d’accès ou identifiants)
 pub mod bindkey;
 
-// Modèle pour la table `disks` (disques attachés aux machines)
-pub mod disk;
+
 
 // Modèle pour la table `volumes` (espaces de stockage logiques)
 pub mod volume;

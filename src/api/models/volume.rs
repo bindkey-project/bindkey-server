@@ -38,11 +38,6 @@ pub struct Volume {
     /// (ON DELETE CASCADE en DB).
     pub owner_id: Uuid,
 
-    /// Disque physique sur lequel le volume est stocké.
-    ///
-    /// Si le disque est supprimé, les volumes associés disparaissent également.
-    pub disk_id: Uuid,
-
     /// Nom lisible du volume (ex : "Travail", "Photos", "Secret").
     pub name: String,
 

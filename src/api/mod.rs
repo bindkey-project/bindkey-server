@@ -17,7 +17,7 @@ use crate::api::middleware::auth_middleware::auth_middleware;
 
 // Import des différents groupes de routes
 use crate::api::routes::{
-    bindkey_routes, disk_routes, mount_routes, permission_routes, session_routes, user_routes,
+    bindkey_routes, mount_routes, permission_routes, session_routes, user_routes,
     volume_routes,
 };
 
@@ -35,7 +35,6 @@ pub fn create_app(state: AppState) -> Router {
         .merge(user_routes())
         .merge(bindkey_routes())
         .merge(volume_routes())
-        .merge(disk_routes())
         .merge(mount_routes())
         .merge(permission_routes());
 
