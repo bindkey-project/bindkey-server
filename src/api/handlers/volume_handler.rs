@@ -40,10 +40,9 @@ pub struct PrepareVolumeResponse {
 
 #[derive(serde::Deserialize)]
 pub struct CreateVolumeRequest {
-    pub volume_id: Uuid,
-    pub name: String,
-    pub size_bytes: i64,
-    pub encrypted_key: String,
+    pub id: Uuid,         // volume_id.clone()
+    pub name: String,     // clone_volume_name
+    pub size_bytes: i64,  // clone_volume_size
 }
 
 #[derive(serde::Serialize)]
@@ -128,43 +127,45 @@ pub async fn create_volume(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
     Json(payload): Json<CreateVolumeRequest>,
-) -> Result<Json<CreateVolumeResponse>, (StatusCode, String)> {
+) -> Result<StatusCode, (StatusCode, String)> {
+    // 1) Retrouver la bindkey de l'utilisateur
     let bindkey_id: Uuid = sqlx::query_scalar("SELECT id FROM bindkeys WHERE user_id = $1")
         .bind(auth.user_id)
         .fetch_one(&state.db)
         .await
         .map_err(|_| (StatusCode::NOT_FOUND, "BindKey not found for user".into()))?;
 
+    // 2) INSERT (on enlève encrypted_key de l'insert car absente du payload)
+    // Note : si ta colonne DB est NOT NULL, il faudra lui mettre une valeur par défaut ou l'autoriser à être NULL
     sqlx::query(
         r#"
         INSERT INTO volumes (id, owner_id, bindkey_id, name, size_bytes, encrypted_key)
         VALUES ($1, $2, $3, $4, $5, $6)
         "#,
     )
-    .bind(payload.volume_id)
+    .bind(payload.id)
     .bind(auth.user_id)
     .bind(bindkey_id)
     .bind(&payload.name)
     .bind(payload.size_bytes)
-    .bind(&payload.encrypted_key)
+    .bind("") // On met une chaîne vide pour l'instant si tu n'as pas encore la clé
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
 
+    // 3) Audit
     write_audit_log(
         &state,
         Some(auth.user_id),
         None,
         "VOLUME_CREATE",
-        Some(format!("volume_id={}", payload.volume_id)),
+        Some(format!("volume_id={} name={}", payload.id, payload.name)),
         AuditSeverity::INFO,
     )
     .await;
 
-    Ok(Json(CreateVolumeResponse {
-        volume_id: payload.volume_id,
-        message: "Volume created".into(),
-    }))
+    // Retourne juste 201 OK sans JSON
+    Ok(StatusCode::CREATED)
 }
 
 pub async fn get_volume(
