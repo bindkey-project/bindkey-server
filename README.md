@@ -57,3 +57,11 @@ bindkey=# INSERT INTO bindkeys (
 
 
 la signature sans le préfixe 0x, juste les caractères de 0-9 et A-F
+
+
+Route lister toutes les bindkeys en tant que ADMIN seulemement -> bindkeys/all voir l'ID + à qui elle appartient + son status
+Route pour supprimer BINDKEY -> bindkeys/delete/:id (modifier le statut),on recoit le nouveau etat de la bindkey 
+Route pour verifier si le nom du volume que tu m'envoie existe déjà -> volumes/verify , si oui envoyer ID volume , si non envoyer non 
+
+
+
