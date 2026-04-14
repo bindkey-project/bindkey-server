@@ -16,7 +16,7 @@ spec:
       owner: admin_bindkey 
       secret:
         name: bindkey-db-secrets
-managed:
+  managed:
     roles:
       - name: admin_bindkey
         ensure: present
@@ -24,11 +24,18 @@ managed:
         passwordSecret:
           name: bindkey-db-secrets
 ---
-# --- 2. L'API RUST ---
+# --- 2. L'API RUST (AVEC AUTO-DEPLOY KEEL) ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: bindkey-api-deployment
+  annotations:
+    # Keel update policy: 'force' pour toujours récupérer l'image même si le tag ne change pas (latest)
+    keel.sh/policy: force
+    # Keel trigger: 'poll' pour vérifier le registre GHCR périodiquement
+    keel.sh/trigger: poll
+    # Keel schedule: Vérification toutes les minutes
+    keel.sh/pollSchedule: "@every 1m"
 spec:
   replicas: 1 
   selector:
@@ -44,7 +51,7 @@ spec:
       containers:
         - name: bindkey-api
           image: ghcr.io/bindkey-project/bindkey-server/bindkey-server:latest
-          imagePullPolicy: Always
+          imagePullPolicy: Always # Indispensable pour Keel
           ports:
             - containerPort: 8080
           env:
@@ -62,10 +69,10 @@ kind: Service
 metadata:
   name: bindkey-service
 spec:
-  type: NodePort # Permet l'accès externe permanent
+  type: NodePort 
   selector:
     app: bindkey-api
   ports:
-    - port: 8080       # Port interne au cluster
-      targetPort: 8080 # Port sur lequel ton API écoute dans le container
-      nodePort: 30080  # Port fixe sur l'IP de ton Mac Debian
+    - port: 8080       
+      targetPort: 8080 
+      nodePort: 30080
