@@ -369,19 +369,17 @@ pub async fn register_user_with_key(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("User SQL Error: {e}")))?;
  
     // 6. INSERT BINDKEY
-    // On insère "NULL" en dur pour fingerprint_template
-  sqlx::query(
-        r#"
-        INSERT INTO bindkeys (
-            id, user_id, bindkey_uid, fingerprint_template, public_key, status
-        ) -- Assure-toi que cette parenthèse est bien là et seule
-        VALUES ($1, $2, $3, $4, $5, $6::text::bindkey_status)
-        "#
+    sqlx::query(
+    r#"
+    INSERT INTO bindkeys (
+        id, user_id, bindkey_uid, public_key, status
+    )
+    VALUES ($1, $2, $3, $4, $5::text::bindkey_status)
+    "#
     )
     .bind(bindkey_id)
     .bind(user_id)
     .bind(&payload.bindkey_uid)
-    .bind("NULL")
     .bind(&payload.public_key)
     .bind(&payload.bindkey_status)
     .execute(&mut *tx)

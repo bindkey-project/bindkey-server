@@ -39,7 +39,6 @@ pub struct EnrollBindkeyRequest {
     pub user_id: Uuid,                // Utilisateur propriétaire de la BindKey
     pub bindkey_uid: String,          // Identifiant matériel unique
     pub public_key: String,           // Clé publique (crypto)
-    pub fingerprint_template: String, // Empreinte biométrique (hashée)
 }
  
 /// Réponse envoyée après enrôlement réussi
@@ -69,9 +68,9 @@ pub async fn enroll_bindkey(
     // 2. Requête SQL d’insertion
     let query = r#"
         INSERT INTO bindkeys (
-            id, user_id, bindkey_uid, fingerprint_template, public_key, status
+            id, user_id, bindkey_uid, public_key, status
         )
-        VALUES ($1, $2, $3, $4, $5, 'ACTIVE')
+        VALUES ($1, $2, $3, $4, 'ACTIVE')
     "#;
  
     // 3. Exécution SQL avec gestion fine des erreurs
@@ -79,7 +78,6 @@ pub async fn enroll_bindkey(
         .bind(bindkey_id)
         .bind(payload.user_id)
         .bind(&payload.bindkey_uid)
-        .bind(&payload.fingerprint_template)
         .bind(&payload.public_key)
         .execute(&state.db)
         .await

@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------------
+// volume_routes_module.rs
+// Déclaration des routes HTTP liées aux volumes chiffrés
+// -----------------------------------------------------------------------------
+
 // Axum Router : permet de définir les routes HTTP
 use axum::{
     Router,
@@ -35,24 +40,25 @@ pub fn volume_routes() -> Router<crate::db::AppState> {
         // ─────────────────────────────────────────
         // POST /volumes
         // Création d’un nouveau volume chiffré
-        // ─────────────────────────────────────────
         .route("/volumes", post(create_volume))
 
         // --- Routes avec paramètres (:id) ---
         
         // ─────────────────────────────────────────
         // GET /volumes/:id
-        // Récupération d’un volume par son identifiant
-        // ─────────────────────────────────────────
+        // Récupérer les informations d’un volume
         .route("/volumes/:id", get(get_volume))
 
-        // ─────────────────────────────────────────
+
+        // GET /volumes/:id/key
+        // Récupérer la clé active d’un volume (si autorisé)
+        .route("/volumes/:id/key", get(get_volume_key))
+
         // GET /users/:id/volumes
-        // Liste des volumes dont l’utilisateur est propriétaire
-        // ─────────────────────────────────────────
+        // Lister les volumes appartenant à un utilisateur
         .route("/users/:id/volumes", get(list_user_volumes))
 
-        // ─────────────────────────────────────────
+
         // PATCH /volumes/:id
         // Modification d’un volume existant
         // ─────────────────────────────────────────
@@ -60,7 +66,6 @@ pub fn volume_routes() -> Router<crate::db::AppState> {
 
         // ─────────────────────────────────────────
         // DELETE /volumes/:id
-        // Suppression définitive d’un volume
-        // ─────────────────────────────────────────
+        // Supprimer définitivement un volume
         .route("/volumes/:id", delete(delete_volume))
 }

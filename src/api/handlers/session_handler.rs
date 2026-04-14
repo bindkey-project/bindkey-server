@@ -9,7 +9,6 @@ use axum::{Json, extract::State, http::StatusCode};
 use chrono::{Duration, Utc};
 use uuid::Uuid;
 use base64::{Engine as _, engine::general_purpose};
-use std::convert::TryInto;
 use rand::{Rng, distr::Alphanumeric, rng};
 use sqlx::Row;
 use p256::ecdsa::{VerifyingKey, Signature, signature::Verifier};

@@ -27,14 +27,6 @@ pub struct MountedVolume {
     /// Utilisateur ayant monté le volume.
     pub user_id: Uuid,
 
-    /// Session utilisée pour monter le volume.
-    ///
-    /// Permet de :
-    /// - lier le montage à une session authentifiée
-    /// - invalider proprement un montage si la session expire
-    /// - auditer précisément les accès
-    pub session_id: Uuid,
-
     /// Volume chiffré concerné par le montage.
     pub volume_id: Uuid,
 

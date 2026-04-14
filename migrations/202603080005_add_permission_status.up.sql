@@ -1,0 +1,1 @@
+CREATE TYPE permission_status AS ENUM ('ACTIVE', 'REVOKED');
