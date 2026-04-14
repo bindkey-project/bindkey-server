@@ -8,10 +8,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  DATABASE_URL: postgres://bindkey:bindkey@localhost:5432/bindkey
-  # On définit les noms d'images pour GHCR
-  SERVER_IMAGE: ghcr.io/${{ github.repository }}/bindkey-server
-  DB_IMAGE: ghcr.io/${{ github.repository }}/bindkey-db
+  # Image names (S'assure que c'est en minuscules pour GHCR)
+  SERVER_IMAGE: ghcr.io/${{ github.repository_owner }}/bindkey-server/bindkey-server
+  DB_IMAGE: ghcr.io/${{ github.repository_owner }}/bindkey-server/bindkey-db
 
 jobs:
   # --- JOB 1 : TESTS ET SÉCURITÉ ---
@@ -38,15 +37,13 @@ jobs:
     - name: Rust Cache
       uses: Swatinem/rust-cache@v2
 
-    - name: Install OpenSSL (pour certificats de test)
+    - name: Install OpenSSL
       run: sudo apt-get update && sudo apt-get install -y openssl
 
     - name: Generate Temporary SSL Certs
       run: |
         openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -sha256 -days 1 -nodes \
         -subj "/C=FR/ST=Paris/L=Paris/O=BindKey/OU=Dev/CN=localhost"
-        # Assure-toi que ton code Rust cherche bien ces noms de fichiers à la racine
-        # ou configure les variables d'env correspondantes ci-dessous.
 
     - name: Audit de sécurité
       run: cargo audit --ignore RUSTSEC-2023-0071 || echo "Audit failed but continuing"
@@ -60,33 +57,31 @@ jobs:
         DATABASE_URL: postgres://bindkey:bindkey@localhost:5432/bindkey
       run: cargo test --verbose
 
-    # --- LE SMOKE TEST CRUCIAL ---
+    # --- LE SMOKE TEST (CORRIGÉ POUR LE GREP) ---
     - name: Verify Server Startup & Migrations Logic
       env:
         DATABASE_URL: postgres://bindkey:bindkey@localhost:5432/bindkey
         PWD_ENCRYPTION_KEY: ${{ secrets.PWD_ENCRYPTION_KEY }}
-        # Variables d'env pour que ton code trouve les certs générés
         TLS_CERT_PATH: ./cert.pem
         TLS_KEY_PATH: ./key.pem
-        RUST_LOG: debug # Pour voir les logs SQLx en cas d'erreur
+        RUST_LOG: debug
       run: |
         echo "🚀 Lancement du serveur BindKey (Smoke Test)..."
         
-        # On lance le serveur. S'il y a un panic de migration, il sera écrit ici.
+        # Lancement en arrière-plan
         cargo run &> server_output.log &
         SERVER_PID=$!
 
-        echo "⏳ Attente du signal : 🛡️ BindKey server running..."
+        echo "⏳ Attente du signal de démarrage..."
         TIMEOUT=60
         while [ $TIMEOUT -gt 0 ]; do
-          # 1. Check si le serveur est déjà opérationnel
-          if grep -q "🛡️ BindKey SERVER running" server_output.log; then
+          # CORRECTION : grep -qi (ignore case) et .* pour gérer les espaces doubles
+          if grep -qi "BindKey SERVER.*running" server_output.log; then
             echo "✅ SUCCESS : Serveur en ligne et migrations OK !"
             kill $SERVER_PID
             exit 0
           fi
 
-          # 2. Check si le serveur a crashé (Erreur SQL, Certs manquants, Panic)
           if ! kill -0 $SERVER_PID 2>/dev/null; then
             echo "❌ CRITICAL FAILURE : Le serveur a crashé !"
             echo "--- LOGS DU SERVEUR ---"
@@ -98,18 +93,18 @@ jobs:
           TIMEOUT=$((TIMEOUT-2))
         done
 
-        echo "❌ TIMEOUT : Le serveur n'a pas démarré après 60s"
+        echo "❌ TIMEOUT : Le serveur n'a pas répondu après 60s"
         cat server_output.log
         kill $SERVER_PID || true
         exit 1
 
-  # --- JOB 2 : BUILD ET PUSH DES IMAGES (GHCR) ---
+  # --- JOB 2 : BUILD ET PUSH ---
   build_and_push:
-    needs: security_and_quality # On ne build que si les tests passent
+    needs: security_and_quality
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write # Indispensable pour pousser sur GHCR
+      packages: write
 
     steps:
     - uses: actions/checkout@v4
@@ -121,20 +116,23 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    # Construction de l'image du SERVEUR
     - name: Build and push Server Image
       uses: docker/build-push-action@v5
       with:
         context: .
         file: ./Dockerfile
         push: true
-        tags: ${{ env.SERVER_IMAGE }}:latest,${{ env.SERVER_IMAGE }}:${{ github.sha }}
+        # On pousse 'latest' (pour Keel) et le 'SHA' (pour l'historique)
+        tags: |
+          ${{ env.SERVER_IMAGE }}:latest
+          ${{ env.SERVER_IMAGE }}:${{ github.sha }}
 
-    # Construction de l'image de la DATABASE
     - name: Build and push DB Image
       uses: docker/build-push-action@v5
       with:
         context: .
         file: ./Dockerfile.db
         push: true
-        tags: ${{ env.DB_IMAGE }}:latest,${{ env.DB_IMAGE }}:${{ github.sha }}
+        tags: |
+          ${{ env.DB_IMAGE }}:latest
+          ${{ env.DB_IMAGE }}:${{ github.sha }}
