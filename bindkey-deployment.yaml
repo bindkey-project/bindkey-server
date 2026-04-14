@@ -34,6 +34,7 @@ metadata:
     keel.sh/trigger: poll
     keel.sh/pollSchedule: "@every 1m"
     keel.sh/auth: "ghcr-auth"
+    keel.sh/debug: "true"
 spec:
   replicas: 1 
   selector:
