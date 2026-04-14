@@ -49,6 +49,7 @@ pub struct VerifyVolumeRequest {
 #[derive(serde::Serialize)]
 pub struct VerifyVolumeResponse {
     pub exists: bool,
+    #[serde(skip_serializing_if = "Option::is_none")] // <--- Ajoute ça
     pub volume_id: Option<Uuid>,
 }
 
