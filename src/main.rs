@@ -22,7 +22,7 @@ async fn main() {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    tracing::info!("Starting BindKey server logic with TLS...");
+    tracing::info!("Starting BindKey SERVER logic with TLS...");
 
     // On utilise la fonction qui est maintenant dans la lib
     let app = create_app_instance().await;
