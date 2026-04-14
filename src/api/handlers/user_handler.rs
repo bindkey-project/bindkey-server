@@ -23,6 +23,9 @@ use crate::api::middleware;
  
 // Audit
 use crate::api::audit::{AuditSeverity, write_audit_log};
+
+// lire les colonnes de la requête SQL ligne par ligne.
+use sqlx::Row;
  
 //
 // ─────────────────────────────────────────────────────────────
@@ -264,7 +267,43 @@ pub struct UserListItem {
     pub role: String,   // si en DB c'est TEXT/ENUM, String marche
     pub status: String, // idem
 }
- 
+
+/// DTO représentant la BindKey d'un utilisateur dans l'espace admin.
+///
+/// Important :
+/// - `serial_number` côté API correspond ici à `bindkey_uid` côté base de données.
+/// - On garde ce nom pour coller au format attendu par le front.
+#[derive(serde::Serialize)]
+pub struct AdminBindkeyDto {
+    pub serial_number: String,
+    pub status: String,
+}
+
+/// DTO combiné attendu pour :
+/// GET /admin/users/search?email=...
+///
+/// Il retourne :
+/// - les informations de l'utilisateur
+/// - sa BindKey si elle existe
+///
+/// Si aucune BindKey n'est associée, `bindkey = null`.
+#[derive(serde::Serialize)]
+pub struct AdminUserSearchResponse {
+    pub id: Uuid,
+    pub first_name: String,
+    pub last_name: String,
+    pub email: String,
+    pub role: String,
+    pub bindkey: Option<AdminBindkeyDto>,
+}
+
+/// Query string pour la recherche admin :
+/// GET /admin/users/search?email=test@test.com
+#[derive(serde::Deserialize)]
+pub struct AdminUserSearchQuery {
+    pub email: String,
+}
+
 pub async fn list_users(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
@@ -294,6 +333,103 @@ pub async fn list_users(
  
     Ok(Json(users))
 }
+
+/// GET /admin/users/search?email=...
+///
+/// Recherche un utilisateur par email et retourne :
+/// - ses informations principales
+/// - sa BindKey si elle existe
+///
+/// Sécurité : ADMIN uniquement.
+pub async fn admin_search_user(
+    Extension(auth): Extension<AuthUser>,
+    State(state): State<AppState>,
+    Query(q): Query<AdminUserSearchQuery>,
+) -> Result<Json<AdminUserSearchResponse>, (StatusCode, String)> {
+    // ------------------------------------------------------------------
+    // 1. Vérification du rôle ADMIN
+    // ------------------------------------------------------------------
+    if !require_role(&auth.role, &UserRole::ADMIN) {
+        return Err((StatusCode::FORBIDDEN, "ADMIN required".into()));
+    }
+
+    // ------------------------------------------------------------------
+    // 2. Validation simple
+    // ------------------------------------------------------------------
+    if q.email.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "email is required".into()));
+    }
+
+    // ------------------------------------------------------------------
+    // 3. Requête SQL
+    // ------------------------------------------------------------------
+    //
+    // LEFT JOIN permet de récupérer l'utilisateur même s'il n'a pas de BindKey.
+    // Si plusieurs BindKeys existent, on prend la plus récente.
+    let row = sqlx::query(
+        r#"
+        SELECT
+            u.id,
+            u.first_name,
+            u.last_name,
+            u.email,
+            u.role::text AS role,
+            b.bindkey_uid,
+            b.status::text AS bindkey_status
+        FROM users u
+        LEFT JOIN bindkeys b
+            ON b.user_id = u.id
+        WHERE u.email = $1
+        ORDER BY b.created_at DESC
+        LIMIT 1
+        "#
+    )
+    .bind(&q.email)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("SQL error: {e}"),
+        )
+    })?;
+
+    // ------------------------------------------------------------------
+    // 4. Si l'utilisateur n'existe pas
+    // ------------------------------------------------------------------
+    let Some(row) = row else {
+        return Err((StatusCode::NOT_FOUND, "User not found".into()));
+    };
+
+    // ------------------------------------------------------------------
+    // 5. Lecture des colonnes de BindKey
+    // ------------------------------------------------------------------
+    //
+    // Comme on a un LEFT JOIN, bindkey_uid et bindkey_status peuvent être NULL.
+    let bindkey_uid: Option<String> = row.try_get("bindkey_uid").ok();
+    let bindkey_status: Option<String> = row.try_get("bindkey_status").ok();
+
+    // ------------------------------------------------------------------
+    // 6. Construction de la réponse
+    // ------------------------------------------------------------------
+    let response = AdminUserSearchResponse {
+        id: row.get("id"),
+        first_name: row.get("first_name"),
+        last_name: row.get("last_name"),
+        email: row.get("email"),
+        role: row.get("role"),
+        bindkey: match (bindkey_uid, bindkey_status) {
+            (Some(serial_number), Some(status)) => Some(AdminBindkeyDto {
+                serial_number,
+                status,
+            }),
+            _ => None,
+        },
+    };
+
+    Ok(Json(response))
+}
+
 #[derive(serde::Deserialize)]
 pub struct FullRegisterRequest {
     pub first_name: String,
@@ -452,6 +588,6 @@ pub async fn delete_user(
         AuditSeverity::WARNING,
     )
     .await;
- 
-    Ok(StatusCode::NO_CONTENT)
+
+    Ok(StatusCode::OK)
 }

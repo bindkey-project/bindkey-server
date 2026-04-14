@@ -23,6 +23,10 @@ use crate::api::models::bindkey::{Bindkey, BindkeyStatus};
 use crate::api::auth::{AuthUser, require_role};
 use crate::api::models::user::UserRole;
  
+
+// Audit
+use crate::api::audit::{AuditSeverity, write_audit_log};
+
 //
 // ─────────────────────────────────────────────────────────────
 // 1) ENROLL — POST /bindkeys/enroll
@@ -58,8 +62,6 @@ pub async fn enroll_bindkey(
     if !require_role(&auth.role, &UserRole::ENROLLER) {
         return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
     }
- 
-    // Génération d’un UUID pour la nouvelle BindKey
  
     // 1. Génération d’un UUID pour la nouvelle BindKey
  
@@ -180,7 +182,19 @@ pub async fn get_user_bindkeys(
 pub struct UpdateBindkeyStatusRequest {
     pub status: BindkeyStatus,
 }
- 
+
+/// Body JSON attendu pour :
+/// PATCH /admin/bindkeys/:serial_number/status
+///
+/// Exemple :
+/// {
+///   "status": "ACTIVE"
+/// }
+#[derive(serde::Deserialize)]
+pub struct AdminUpdateBindkeyStatusRequest {
+    pub status: BindkeyStatus,
+}
+
 pub async fn update_bindkey_status(
     Extension(auth): Extension<AuthUser>, // Utilisateur authentifié
     State(state): State<AppState>,
@@ -211,7 +225,101 @@ pub async fn update_bindkey_status(
  
     Ok(StatusCode::NO_CONTENT)
 }
- 
+
+/// PATCH /admin/bindkeys/:serial_number/status
+///
+/// Change le statut d'une BindKey à partir de son serial_number.
+///
+/// IMPORTANT :
+/// - `serial_number` côté API correspond à `bindkey_uid` en base.
+/// - seules les valeurs de l'enum BindkeyStatus sont acceptées :
+///   ACTIVE, RESET, LOST, BROKEN
+///
+/// Sécurité : ADMIN uniquement.
+pub async fn admin_update_bindkey_status_by_serial(
+    Extension(auth): Extension<AuthUser>,
+    State(state): State<AppState>,
+    Path(serial_number): Path<String>,
+    Json(payload): Json<AdminUpdateBindkeyStatusRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    // ------------------------------------------------------------------
+    // 1. Vérification du rôle ADMIN
+    // ------------------------------------------------------------------
+    //
+    // On refuse l'accès à tout utilisateur qui n'est pas ADMIN.
+    if !require_role(&auth.role, &UserRole::ADMIN) {
+        return Err((StatusCode::FORBIDDEN, "ADMIN required".into()));
+    }
+
+    // ------------------------------------------------------------------
+    // 2. Validation minimale
+    // ------------------------------------------------------------------
+    //
+    // On évite une requête inutile si le serial_number est vide.
+    if serial_number.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "serial_number is required".into()));
+    }
+
+    // On prépare une version texte du status AVANT le bind
+    let status_for_log = format!("{:?}", payload.status);
+
+    // ------------------------------------------------------------------
+    // 3. Mise à jour de la BindKey
+    // ------------------------------------------------------------------
+    //
+    // On met à jour le statut en recherchant la BindKey par bindkey_uid
+    // (qui joue ici le rôle de serial_number côté API).
+    let res = sqlx::query(
+        r#"
+        UPDATE bindkeys
+        SET status = $1
+        WHERE bindkey_uid = $2
+        "#
+    )
+    .bind(payload.status)
+    .bind(&serial_number)
+    .execute(&state.db)
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("SQL error: {e}"),
+        )
+    })?;
+
+    // ------------------------------------------------------------------
+    // 4. Si aucune ligne n'a été modifiée
+    // ------------------------------------------------------------------
+    //
+    // Cela signifie qu'aucune BindKey avec ce serial_number n'existe.
+    if res.rows_affected() == 0 {
+        return Err((StatusCode::NOT_FOUND, "BindKey not found".into()));
+    }
+
+    // ------------------------------------------------------------------
+    // 5. Audit
+    // ------------------------------------------------------------------
+    //
+    // On enregistre l'action admin dans les logs d'audit.
+    let _ = write_audit_log(
+    &state,
+    Some(auth.user_id),
+    None,
+    "ADMIN_BINDKEY_STATUS_UPDATE",
+    Some(format!(
+        "serial_number={} new_status={}",
+        serial_number, status_for_log
+    )),
+    AuditSeverity::WARNING,
+)
+.await;
+
+    // ------------------------------------------------------------------
+    // 6. Réponse attendue
+    // ------------------------------------------------------------------
+    Ok(StatusCode::OK)
+}
+
 //
 // ─────────────────────────────────────────────────────────────
 // 5) RESET — POST /bindkeys/:id/reset
