@@ -41,7 +41,7 @@ async fn main() {
     .unwrap();
 
     tracing::info!(
-        "🛡️ BindKey server running on https://localhost:{}/",
+        "🛡️ BindKey SERVER  running on https://localhost:{}/",
         cfg.port
     );
 
