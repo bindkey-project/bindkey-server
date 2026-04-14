@@ -80,7 +80,7 @@ jobs:
         TIMEOUT=60
         while [ $TIMEOUT -gt 0 ]; do
           # 1. Check si le serveur est déjà opérationnel
-          if grep -q "🛡️ BindKey server running" server_output.log; then
+          if grep -q "🛡️ BindKey SERVER running" server_output.log; then
             echo "✅ SUCCESS : Serveur en ligne et migrations OK !"
             kill $SERVER_PID
             exit 0
