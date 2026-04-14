@@ -3,7 +3,6 @@
 // Déclaration des routes HTTP liées aux volumes chiffrés
 // -----------------------------------------------------------------------------
 
-// Axum Router : permet de définir les routes HTTP
 use axum::{
     Router,
     routing::{delete, get, patch, post},
@@ -14,17 +13,16 @@ use crate::api::handlers::volume_handler::{
     create_volume,     // POST   /volumes
     delete_volume,     // DELETE /volumes/:id
     get_volume,        // GET    /volumes/:id
+    get_volume_key,    // GET    /volumes/:id/key <-- Ajouté ici
     list_user_volumes, // GET    /users/:id/volumes
     prepare_volume,    // POST   /volumes/prepare
-    verify_volume,     // POST   /volumes/verify  <-- Nouveau handler
+    verify_volume,     // POST   /volumes/verify
     update_volume,     // PATCH  /volumes/:id
 };
 
 // ─────────────────────────────────────────────────────────────
 // Déclaration des routes Volumes
 // ─────────────────────────────────────────────────────────────
-// Ces routes permettent la gestion complète du cycle de vie
-// des volumes chiffrés BindKey.
 
 pub fn volume_routes() -> Router<crate::db::AppState> {
     Router::new()
@@ -40,25 +38,30 @@ pub fn volume_routes() -> Router<crate::db::AppState> {
         // ─────────────────────────────────────────
         // POST /volumes
         // Création d’un nouveau volume chiffré
+        // ─────────────────────────────────────────
         .route("/volumes", post(create_volume))
 
         // --- Routes avec paramètres (:id) ---
         
         // ─────────────────────────────────────────
         // GET /volumes/:id
-        // Récupérer les informations d’un volume
+        // Récupérer les informations d’un volume (Métadonnées)
+        // ─────────────────────────────────────────
         .route("/volumes/:id", get(get_volume))
 
-
+        // ─────────────────────────────────────────
         // GET /volumes/:id/key
         // Récupérer la clé active d’un volume (si autorisé)
+        // ─────────────────────────────────────────
         .route("/volumes/:id/key", get(get_volume_key))
 
+        // ─────────────────────────────────────────
         // GET /users/:id/volumes
         // Lister les volumes appartenant à un utilisateur
+        // ─────────────────────────────────────────
         .route("/users/:id/volumes", get(list_user_volumes))
 
-
+        // ─────────────────────────────────────────
         // PATCH /volumes/:id
         // Modification d’un volume existant
         // ─────────────────────────────────────────
@@ -67,5 +70,6 @@ pub fn volume_routes() -> Router<crate::db::AppState> {
         // ─────────────────────────────────────────
         // DELETE /volumes/:id
         // Supprimer définitivement un volume
+        // ─────────────────────────────────────────
         .route("/volumes/:id", delete(delete_volume))
 }
