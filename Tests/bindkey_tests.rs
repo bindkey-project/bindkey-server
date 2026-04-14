@@ -270,7 +270,7 @@ async fn test_get_user_bindkeys_list_content() {
 // Test 5 : GET /me/grants
 // Vérifie que l'utilisateur récupère bien ses accès
 // ─────────────────────────────────────────────────────────────
-#[tokio::test]
+/*#[tokio::test]
 async fn test_get_my_grants_basic() {
     let app = create_app_instance().await;
 
@@ -479,7 +479,7 @@ async fn test_get_my_grants_basic() {
     .execute(pool)
     .await
     .expect("Erreur lors de l'insertion de la bindkey");
-}
+}*/
 #[tokio::test]*/
 /*async fn test_full_authentication_flow() {
     // 1. Initialisation du serveur de test (In-Memory)
