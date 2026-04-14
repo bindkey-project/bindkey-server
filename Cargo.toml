@@ -68,6 +68,7 @@ axum-test = "16.4.0"
 sha2 = "0.10.9"
 p256 = { version = "0.13", features = ["ecdsa"] }
 ecdsa = "0.16"
+thiserror = "2.0.18"
 
 
 [lib]
