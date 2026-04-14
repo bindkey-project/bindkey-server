@@ -30,12 +30,10 @@ kind: Deployment
 metadata:
   name: bindkey-api-deployment
   annotations:
-    # Keel update policy: 'force' pour toujours récupérer l'image même si le tag ne change pas (latest)
     keel.sh/policy: force
-    # Keel trigger: 'poll' pour vérifier le registre GHCR périodiquement
     keel.sh/trigger: poll
-    # Keel schedule: Vérification toutes les minutes
     keel.sh/pollSchedule: "@every 1m"
+    keel.sh/auth: "ghcr-auth"
 spec:
   replicas: 1 
   selector:
