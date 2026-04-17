@@ -1,4 +1,4 @@
-# --- 1. LE CLUSTER POSTGRESQL (Avec Chiffrement des Volumes) ---
+# --- 1. LE CLUSTER POSTGRESQL (Inchangé) ---
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -9,10 +9,7 @@ spec:
   imagePullSecrets:
     - name: ghcr-auth
   storage:
-    size: 2Gi # Augmenté un peu pour la sécurité
-    # Note: Si ton serveur Debian utilise LUKS, le volume est déjà chiffré au repos.
-  
-  # Configuration pour la gestion sécurisée des secrets
+    size: 2Gi
   bootstrap:
     initdb:
       database: bindkey
@@ -28,16 +25,16 @@ spec:
           name: bindkey-db-secrets
 
 ---
-# --- 2. L'API RUST (AVEC ARGO-CD IMAGE UPDATER) ---
+# --- 2. L'API RUST (CORRIGÉ) ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: bindkey-api-deployment
+  # Note : Les annotations ici sont lues par l'Updater si write-back-method est 'kubernetes'
   annotations:
-    # On remplace Keel par ArgoCD Image Updater (Méthode Pro)
     argocd-image-updater.argoproj.io/image-list: bindkey=ghcr.io/bindkey-project/bindkey-server/bindkey-server:latest
     argocd-image-updater.argoproj.io/bindkey.update-strategy: digest
-    argocd-image-updater.argoproj.io/write-back-method: kubernetes
+    argocd-image-updater.argoproj.io/write-back-method: argocd # On passe en mode argocd pour la compatibilité
 spec:
   replicas: 1 
   selector:
@@ -48,12 +45,10 @@ spec:
       labels:
         app: bindkey-api
     spec:
-      # Patch DNS pour s'assurer que le Pod peut contacter GitHub
-      dnsPolicy: "None"
-      dnsConfig:
-        nameservers:
-          - 8.8.8.8
-          - 1.1.1.1
+      # --- LA CORRECTION DNS EST ICI ---
+      dnsPolicy: ClusterFirst  # On remet le DNS interne de Kubernetes
+      # On a supprimé le bloc dnsConfig (8.8.8.8) qui empêchait de voir bindkey-db-rw
+      # --------------------------------
       imagePullSecrets:
         - name: ghcr-auth
       containers:
@@ -72,7 +67,7 @@ spec:
               value: "debug"
 
 ---
-# --- 3. SERVICE PERMANENT (NODEPORT) ---
+# --- 3. SERVICE PERMANENT (Inchangé) ---
 apiVersion: v1
 kind: Service
 metadata:
