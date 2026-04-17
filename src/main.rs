@@ -41,7 +41,7 @@ async fn main() {
     .unwrap();
 
     tracing::info!(
-        "🛡️ BindKey SERVER ARGOCD running on https://localhost:{}/",
+        "🛡️ BindKey SERVER ARGOCDv2 running on https://localhost:{}/",
         cfg.port
     );
 

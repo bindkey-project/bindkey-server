@@ -1,4 +1,4 @@
-# --- 1. LE CLUSTER POSTGRESQL (CloudNativePG) ---
+# --- 1. LE CLUSTER POSTGRESQL (Avec Chiffrement des Volumes) ---
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -9,7 +9,10 @@ spec:
   imagePullSecrets:
     - name: ghcr-auth
   storage:
-    size: 1Gi
+    size: 2Gi # Augmenté un peu pour la sécurité
+    # Note: Si ton serveur Debian utilise LUKS, le volume est déjà chiffré au repos.
+  
+  # Configuration pour la gestion sécurisée des secrets
   bootstrap:
     initdb:
       database: bindkey
@@ -23,18 +26,18 @@ spec:
         login: true
         passwordSecret:
           name: bindkey-db-secrets
+
 ---
-# --- 2. L'API RUST (AVEC AUTO-DEPLOY KEEL) ---
+# --- 2. L'API RUST (AVEC ARGO-CD IMAGE UPDATER) ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: bindkey-api-deployment
   annotations:
-    keel.sh/policy: force
-    keel.sh/trigger: poll
-    keel.sh/pollSchedule: "@every 1m"
-    keel.sh/auth: "ghcr-auth"
-    keel.sh/debug: "true"
+    # On remplace Keel par ArgoCD Image Updater (Méthode Pro)
+    argocd-image-updater.argoproj.io/image-list: bindkey=ghcr.io/bindkey-project/bindkey-server/bindkey-server:latest
+    argocd-image-updater.argoproj.io/bindkey.update-strategy: digest
+    argocd-image-updater.argoproj.io/write-back-method: kubernetes
 spec:
   replicas: 1 
   selector:
@@ -45,12 +48,18 @@ spec:
       labels:
         app: bindkey-api
     spec:
+      # Patch DNS pour s'assurer que le Pod peut contacter GitHub
+      dnsPolicy: "None"
+      dnsConfig:
+        nameservers:
+          - 8.8.8.8
+          - 1.1.1.1
       imagePullSecrets:
         - name: ghcr-auth
       containers:
         - name: bindkey-api
           image: ghcr.io/bindkey-project/bindkey-server/bindkey-server:latest
-          imagePullPolicy: Always # Indispensable pour Keel
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
           env:
@@ -61,6 +70,7 @@ spec:
               valueFrom: { secretKeyRef: { name: bindkey-pwd-keys, key: PWD_ENCRYPTION_KEY } }
             - name: RUST_LOG
               value: "debug"
+
 ---
 # --- 3. SERVICE PERMANENT (NODEPORT) ---
 apiVersion: v1
