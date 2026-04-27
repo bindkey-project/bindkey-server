@@ -31,7 +31,7 @@ pub struct Volume {
     /// Si l'utilisateur est supprimé, les volumes associés doivent l'être aussi
     /// (ON DELETE CASCADE en DB).
     pub owner_id: Uuid,
-
+    pub bindkey_id: Uuid, // <-- Ajout ici
     /// Nom lisible du volume (ex : "Travail", "Photos", "Secret").
     pub name: String,
 
