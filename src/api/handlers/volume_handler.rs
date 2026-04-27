@@ -112,7 +112,8 @@ pub async fn verify_volume(
     State(state): State<AppState>,
     Json(payload): Json<VerifyVolumeRequest>,
 ) -> Result<Json<VerifyVolumeResponse>, (StatusCode, String)> {
-    let result = sqlx::query_scalar::<_, Uuid>(
+    // 1. On cherche l'ID existant en base
+    let existing_id = sqlx::query_scalar::<_, Uuid>(
         "SELECT id FROM volumes WHERE owner_id = $1 AND name = $2 LIMIT 1"
     )
     .bind(auth.user_id)
@@ -121,9 +122,15 @@ pub async fn verify_volume(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
+    // 2. Détermination de l'ID final et du statut
+    let (exists, volume_id) = match existing_id {
+        Some(id) => (true, id),         // Le volume existe déjà
+        None => (false, Uuid::new_v4()), // Il n'existe pas, on en génère un nouveau
+    };
+
     Ok(Json(VerifyVolumeResponse {
-        exists: result.is_some(),
-        volume_id: result,
+        exists,
+        volume_id: Some(volume_id), // On renvoie toujours un ID maintenant
     }))
 }
 
