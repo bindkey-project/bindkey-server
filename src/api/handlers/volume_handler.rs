@@ -114,8 +114,7 @@ pub async fn verify_volume(
     State(state): State<AppState>,
     Json(payload): Json<VerifyVolumeRequest>,
 ) -> Result<Json<VerifyVolumeResponse>, (StatusCode, String)> {
-    
-    // 1. Recherche du volume existant
+    // 1. Recherche par nom
     let existing: Option<Uuid> = sqlx::query_scalar(
         "SELECT id FROM volumes WHERE owner_id = $1 AND name = $2 LIMIT 1"
     )
@@ -126,59 +125,66 @@ pub async fn verify_volume(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
     if let Some(id) = existing {
-        // Conversion de l'UUID (octets) vers String lisible
-        let id_str = String::from_utf8(id.as_bytes().to_vec())
-            .unwrap_or_else(|_| id.to_string());
-
+        let id_str = String::from_utf8(id.as_bytes().to_vec()).unwrap_or_else(|_| id.to_string());
         return Ok(Json(VerifyVolumeResponse {
             exists: true,
             volume_id: Some(id_str),
         }));
     }
 
-    // 2. Génération du prochain ID textuel si absent
+    // 2. Calcul du prochain ID (Commence à 0002)
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM volumes WHERE owner_id = $1")
         .bind(auth.user_id)
         .fetch_one(&state.db)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error count: {e}")))?;
 
-    let next_id_str = format!("bindkey-vol-{:04}", count + 1);
+    let next_id_str = format!("bindkey-vol-{:04}", count + 2);
+    
+    // Log pour le pod
+    tracing::info!("Verify: Volume '{}' non trouvé. Proposition ID: {}", payload.name, next_id_str);
 
     Ok(Json(VerifyVolumeResponse {
         exists: false,
         volume_id: Some(next_id_str),
     }))
 }
+
 pub async fn create_volume(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
     Json(payload): Json<CreateVolumeRequest>,
 ) -> Result<(StatusCode, Json<CreateVolumeResponse>), (StatusCode, String)> {
     
-    // 1. Conversion du String reçu en Uuid (16 octets) pour la DB
+    // 1. Conversion String -> UUID
     let vol_uuid = Uuid::from_bytes(
         payload.id.as_bytes().try_into()
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Format d'ID invalide (doit faire 16 car.)".into()))?
+        .map_err(|_| {
+            tracing::error!("ID invalide reçu: {}", payload.id);
+            (StatusCode::BAD_REQUEST, "L'ID doit faire 16 octets".into())
+        })?
     );
 
-    // 2. Récupération de la BindKey
+    // 2. Récupération BindKey
     let bindkey_id: Uuid = sqlx::query_scalar(
         "SELECT id FROM bindkeys WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1"
     )
     .bind(auth.user_id)
     .fetch_one(&state.db)
     .await
-    .map_err(|_| (StatusCode::NOT_FOUND, "BindKey non trouvée".into()))?;
+    .map_err(|_| {
+        tracing::error!("Tentative de création de volume sans BindKey pour l'user: {}", auth.user_id);
+        (StatusCode::NOT_FOUND, "BindKey manquante".into())
+    })?;
 
-    // 3. Insertion SQL (Type UUID dans la DB)
+    // 3. Insertion
     sqlx::query(
         r#"
         INSERT INTO volumes (id, owner_id, bindkey_id, name, size_bytes, encrypted_key)
         VALUES ($1, $2, $3, $4, $5, $6)
         "#,
     )
-    .bind(vol_uuid) // On insère l'objet UUID
+    .bind(vol_uuid)
     .bind(auth.user_id)
     .bind(bindkey_id)
     .bind(&payload.name)
@@ -186,27 +192,22 @@ pub async fn create_volume(
     .bind("") 
     .execute(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
+    .map_err(|e| {
+        // CE LOG APPARAÎTRA DANS TON POD API
+        tracing::error!("SQL INSERT FAILED: {:?}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {e}"))
+    })?;
 
-    // 4. Audit & Réponse (en String pour le logiciel)
-    let _ = write_audit_log(
-        &state,
-        Some(auth.user_id),
-        None,
-        "VOLUME_CREATE",
-        Some(format!("vol_id={} name={}", payload.id, payload.name)),
-        AuditSeverity::INFO,
-    ).await;
+    tracing::info!("Volume créé avec succès: {} (ID: {})", payload.name, payload.id);
 
     Ok((
         StatusCode::CREATED,
         Json(CreateVolumeResponse {
-            volume_id: payload.id, // On renvoie le String d'origine
+            volume_id: payload.id,
             message: "Volume créé avec succès".into(),
         }),
     ))
 }
-
 pub async fn get_volume(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
