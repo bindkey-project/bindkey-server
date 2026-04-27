@@ -12,6 +12,7 @@ use crate::api::auth::{require_role, AuthUser};
 use crate::api::models::user::UserRole;
 use crate::api::models::volume::Volume;
 use crate::db::AppState;
+use serde::{Deserialize, Serialize};
 
 // ─────────────────────────────────────────────────────────────
 // STRUCTURES
@@ -28,31 +29,31 @@ pub struct PrepareVolumeResponse {
     pub volume_id: Uuid,
 }
 
-#[derive(serde::Deserialize)]
-pub struct CreateVolumeRequest {
-    pub id: Uuid,
-    pub name: String,
-    pub size_bytes: i64,
-}
-
-#[derive(serde::Serialize)]
-pub struct CreateVolumeResponse {
-    pub volume_id: Uuid,
-    pub message: String,
-}
-
-#[derive(serde::Deserialize)]
+// --- Verify Volume ---
+#[derive(Deserialize)]
 pub struct VerifyVolumeRequest {
     pub name: String,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Serialize)]
 pub struct VerifyVolumeResponse {
     pub exists: bool,
-    #[serde(skip_serializing_if = "Option::is_none")] // <--- Ajoute ça
-    pub volume_id: Option<Uuid>,
+    pub volume_id: Option<String>, // Envoyé en String au logiciel
 }
 
+// --- Create Volume ---
+#[derive(Deserialize)]
+pub struct CreateVolumeRequest {
+    pub id: String, // Reçu en String ("bindkey-vol-0001") depuis le logiciel
+    pub name: String,
+    pub size_bytes: i64,
+}
+
+#[derive(Serialize)]
+pub struct CreateVolumeResponse {
+    pub volume_id: String,
+    pub message: String,
+}
 #[derive(serde::Serialize)]
 pub struct GetVolumeKeyResponse {
     pub volume_id: Uuid,
@@ -69,6 +70,7 @@ pub struct UpdateVolumeRequest {
 // ─────────────────────────────────────────────────────────────
 // HANDLERS
 // ─────────────────────────────────────────────────────────────
+
 
 pub async fn prepare_volume(
     Extension(auth): Extension<AuthUser>,
@@ -112,8 +114,9 @@ pub async fn verify_volume(
     State(state): State<AppState>,
     Json(payload): Json<VerifyVolumeRequest>,
 ) -> Result<Json<VerifyVolumeResponse>, (StatusCode, String)> {
-    // 1. On cherche l'ID existant en base
-    let existing_id = sqlx::query_scalar::<_, Uuid>(
+    
+    // 1. Recherche du volume existant
+    let existing: Option<Uuid> = sqlx::query_scalar(
         "SELECT id FROM volumes WHERE owner_id = $1 AND name = $2 LIMIT 1"
     )
     .bind(auth.user_id)
@@ -122,36 +125,60 @@ pub async fn verify_volume(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
-    // 2. Détermination de l'ID final et du statut
-    let (exists, volume_id) = match existing_id {
-        Some(id) => (true, id),         // Le volume existe déjà
-        None => (false, Uuid::new_v4()), // Il n'existe pas, on en génère un nouveau
-    };
+    if let Some(id) = existing {
+        // Conversion de l'UUID (octets) vers String lisible
+        let id_str = String::from_utf8(id.as_bytes().to_vec())
+            .unwrap_or_else(|_| id.to_string());
+
+        return Ok(Json(VerifyVolumeResponse {
+            exists: true,
+            volume_id: Some(id_str),
+        }));
+    }
+
+    // 2. Génération du prochain ID textuel si absent
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM volumes WHERE owner_id = $1")
+        .bind(auth.user_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    let next_id_str = format!("bindkey-vol-{:04}", count + 1);
 
     Ok(Json(VerifyVolumeResponse {
-        exists,
-        volume_id: Some(volume_id), // On renvoie toujours un ID maintenant
+        exists: false,
+        volume_id: Some(next_id_str),
     }))
 }
-
 pub async fn create_volume(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
     Json(payload): Json<CreateVolumeRequest>,
-) -> Result<StatusCode, (StatusCode, String)> {
-    let bindkey_id: Uuid = sqlx::query_scalar("SELECT id FROM bindkeys WHERE user_id = $1")
-        .bind(auth.user_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|_| (StatusCode::NOT_FOUND, "BindKey not found for user".into()))?;
+) -> Result<(StatusCode, Json<CreateVolumeResponse>), (StatusCode, String)> {
+    
+    // 1. Conversion du String reçu en Uuid (16 octets) pour la DB
+    let vol_uuid = Uuid::from_bytes(
+        payload.id.as_bytes().try_into()
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Format d'ID invalide (doit faire 16 car.)".into()))?
+    );
 
+    // 2. Récupération de la BindKey
+    let bindkey_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM bindkeys WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1"
+    )
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|_| (StatusCode::NOT_FOUND, "BindKey non trouvée".into()))?;
+
+    // 3. Insertion SQL (Type UUID dans la DB)
     sqlx::query(
         r#"
         INSERT INTO volumes (id, owner_id, bindkey_id, name, size_bytes, encrypted_key)
         VALUES ($1, $2, $3, $4, $5, $6)
         "#,
     )
-    .bind(payload.id)
+    .bind(vol_uuid) // On insère l'objet UUID
     .bind(auth.user_id)
     .bind(bindkey_id)
     .bind(&payload.name)
@@ -161,17 +188,23 @@ pub async fn create_volume(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
 
-    write_audit_log(
+    // 4. Audit & Réponse (en String pour le logiciel)
+    let _ = write_audit_log(
         &state,
         Some(auth.user_id),
         None,
         "VOLUME_CREATE",
-        Some(format!("volume_id={} name={}", payload.id, payload.name)),
+        Some(format!("vol_id={} name={}", payload.id, payload.name)),
         AuditSeverity::INFO,
-    )
-    .await;
+    ).await;
 
-    Ok(StatusCode::CREATED)
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateVolumeResponse {
+            volume_id: payload.id, // On renvoie le String d'origine
+            message: "Volume créé avec succès".into(),
+        }),
+    ))
 }
 
 pub async fn get_volume(
