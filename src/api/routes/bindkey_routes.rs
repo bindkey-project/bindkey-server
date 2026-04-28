@@ -9,17 +9,20 @@ use axum::{
     routing::{get, patch, post},
 };
 
+
 // ─────────────────────────────────────────────────────────────
 // Import des handlers BindKey
 // Chaque handler contient la logique métier associée à la route
 // ─────────────────────────────────────────────────────────────
 use crate::api::handlers::bindkey_handler::{
     admin_update_bindkey_status_by_serial, // PATCH /admin/bindkeys/:serial_number/status
-    enroll_bindkey,        // POST  /bindkeys/enroll
-    get_bindkey,           // GET   /bindkeys/:id
-    get_user_bindkeys,     // GET   /users/:id/bindkeys
-    reset_bindkey,         // POST  /bindkeys/:id/reset
-    update_bindkey_status, // PATCH /bindkeys/:id/status
+    enroll_bindkey,                        // POST  /bindkeys/enroll
+    generate_certificate_for_bindkey,      // POST  /bindkeys/:id/certificate
+    get_bindkey,                           // GET   /bindkeys/:id
+    get_certificate_for_bindkey,           // GET   /bindkeys/:id/certificate
+    get_user_bindkeys,                     // GET   /users/:id/bindkeys
+    reset_bindkey,                         // POST  /bindkeys/:id/reset
+    update_bindkey_status,                 // PATCH /bindkeys/:id/status
 };
 
 //
@@ -90,5 +93,19 @@ pub fn bindkey_routes() -> Router<crate::db::AppState> {
         // - désactiver une clé compromise
         // - réactiver une clé
         // ─────────────────────────────────────────
-        .route("/admin/bindkeys/:serial_number/status", patch(admin_update_bindkey_status_by_serial),)
+        .route("/admin/bindkeys/:serial_number/status", patch(admin_update_bindkey_status_by_serial))
+
+        // ─────────────────────────────────────────
+        // POST /bindkeys/:id/certificate
+        // Génère un certificat X.509 signé pour cette BindKey.
+        // Retourne le cert PEM + la clé privée PEM (une seule fois).
+        // Accessible ENROLLER / ADMIN
+        // ─────────────────────────────────────────
+        .route("/bindkeys/:id/certificate", post(generate_certificate_for_bindkey))
+
+        // ─────────────────────────────────────────
+        // GET /bindkeys/:id/certificate
+        // Retourne le certificat X.509 PEM déjà généré.
+        // ─────────────────────────────────────────
+        .route("/bindkeys/:id/certificate", get(get_certificate_for_bindkey))
 }

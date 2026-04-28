@@ -15,6 +15,9 @@ use uuid::Uuid;
  
 // AppState : contient le pool de connexion PostgreSQL
 use crate::db::AppState;
+
+// Génération de certificat BindKey (nouvelle route)
+use crate::api::middleware::ca::generate_bindkey_certificate;
  
 // Modèle Bindkey + enum de statut
 use crate::api::models::bindkey::{Bindkey, BindkeyStatus};
@@ -48,7 +51,7 @@ pub struct EnrollBindkeyRequest {
 /// Réponse envoyée après enrôlement réussi
 #[derive(serde::Serialize)]
 pub struct EnrollBindkeyResponse {
-    pub bindkey_id: Uuid, // ID généré côté serveur
+    pub bindkey_id: Uuid,
     pub message: String,
 }
  
@@ -375,6 +378,104 @@ pub async fn reset_bindkey(
  
     Ok(StatusCode::NO_CONTENT)
 }
- 
- 
+
+//
+// ─────────────────────────────────────────────────────────────
+// 6) GENERATE CERTIFICATE — POST /bindkeys/:id/certificate
+// ─────────────────────────────────────────────────────────────
+//
+// Génère un certificat X.509 pour une BindKey existante en utilisant SA propre
+// clé publique (déjà stockée en base lors de l'enrôlement).
+//
+// La clé privée de la BindKey ne quitte JAMAIS le device — le serveur ne fait
+// que SIGNER un certificat autour de la clé publique avec la Root CA.
+//
+
+#[derive(serde::Serialize)]
+pub struct GenerateCertificateResponse {
+    /// Certificat X.509 PEM signé par la Root CA.
+    pub certificate_pem: String,
+}
+
+pub async fn generate_certificate_for_bindkey(
+    Extension(auth): Extension<AuthUser>,
+    State(state): State<AppState>,
+    Path(bindkey_id): Path<Uuid>,
+) -> Result<Json<GenerateCertificateResponse>, (StatusCode, String)> {
+    // RBAC : ENROLLER ou ADMIN uniquement
+    if !require_role(&auth.role, &UserRole::ENROLLER) {
+        return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
+    }
+
+    // 1. Récupère user_id ET public_key de la BindKey en une seule requête
+    let row: Option<(Option<Uuid>, String)> =
+        sqlx::query_as("SELECT user_id, public_key FROM bindkeys WHERE id = $1")
+            .bind(bindkey_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    let (user_id_opt, public_key) =
+        row.ok_or((StatusCode::NOT_FOUND, "BindKey not found".into()))?;
+    let user_id = user_id_opt.unwrap_or(Uuid::nil());
+
+    // 2. Signature d'un certificat autour de la clé publique de la BindKey.
+    //    Aucune clé privée client n'est manipulée par le serveur.
+    let certificate_pem = generate_bindkey_certificate(
+        &state.ca_cert_pem,
+        &state.ca_key_pem,
+        &public_key,
+        &bindkey_id.to_string(),
+        &user_id.to_string(),
+    )
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Erreur génération certificat: {e}")))?;
+
+    // 3. Stockage du certificat en base (écrase l'ancien si existant)
+    sqlx::query("UPDATE bindkeys SET certificate = $1 WHERE id = $2")
+        .bind(&certificate_pem)
+        .bind(bindkey_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Erreur stockage certificat: {e}")))?;
+
+    // 4. Audit
+    let _ = write_audit_log(
+        &state,
+        Some(auth.user_id),
+        Some(bindkey_id),
+        "BINDKEY_CERTIFICATE_GENERATED",
+        Some(format!("bindkey_id={}", bindkey_id)),
+        AuditSeverity::WARNING,
+    )
+    .await;
+
+    Ok(Json(GenerateCertificateResponse { certificate_pem }))
+}
+
+//
+// ─────────────────────────────────────────────────────────────
+// 7) GET CERTIFICATE — GET /bindkeys/:id/certificate
+// ─────────────────────────────────────────────────────────────
+//
+// Retourne le certificat X.509 PEM déjà généré pour cette BindKey.
+//
+
+pub async fn get_certificate_for_bindkey(
+    State(state): State<AppState>,
+    Path(bindkey_id): Path<Uuid>,
+) -> Result<String, (StatusCode, String)> {
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT certificate FROM bindkeys WHERE id = $1")
+            .bind(bindkey_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    let (cert_opt,) = row.ok_or((StatusCode::NOT_FOUND, "BindKey not found".into()))?;
+
+    cert_opt.ok_or((
+        StatusCode::NOT_FOUND,
+        "Aucun certificat généré pour cette BindKey".into(),
+    ))
+}
  

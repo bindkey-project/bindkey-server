@@ -40,6 +40,10 @@ pub struct Bindkey {
 
     /// Date de création.
     pub created_at: DateTime<Utc>,
+
+    /// Certificat X.509 PEM signé par la Root CA.
+    /// Généré lors de l'enrôlement. None si la BindKey a été créée avant cette feature.
+    pub certificate: Option<String>,
 }
 
 /// Enum SQL : `bindkey_status`

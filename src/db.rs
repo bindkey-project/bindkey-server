@@ -4,10 +4,13 @@ use sqlx::{Pool, Postgres};
 pub type PgPool = Pool<Postgres>;
 
 /// State global de l'application BindKey.
-/// Il contiendra tout ce dont les handlers ont besoin (DB, config, etc.).
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
+    /// Certificat PEM de la Root CA (partagé entre tous les handlers)
+    pub ca_cert_pem: String,
+    /// Clé privée PEM de la Root CA (utilisée pour signer les certificats BindKey)
+    pub ca_key_pem: String,
 }
 
 /// Crée un pool de connexion PostgreSQL à partir d'une URL.
