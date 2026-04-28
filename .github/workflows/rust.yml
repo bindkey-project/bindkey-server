@@ -53,15 +53,22 @@ jobs:
 
     - name: Run Unit Tests
       env:
-        PWD_ENCRYPTION_KEY: ${{ secrets.PWD_ENCRYPTION_KEY }}
+        # On utilise le secret s'il existe, sinon une clé de test de 32 octets
+        PWD_ENCRYPTION_KEY: ${{ secrets.PWD_ENCRYPTION_KEY || '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f' }}
         DATABASE_URL: postgres://bindkey:bindkey@localhost:5432/bindkey
+        # AJOUT : Variables Root CA pour éviter le panic au démarrage des tests
+        ROOT_CA_CERT_PEM: "DUMMY_CERT_FOR_CI"
+        ROOT_CA_KEY_PEM: "DUMMY_KEY_FOR_CI"
       run: cargo test --verbose
 
-    # --- LE SMOKE TEST (CORRIGÉ POUR LE GREP) ---
+    # --- LE SMOKE TEST ---
     - name: Verify Server Startup & Migrations Logic
       env:
         DATABASE_URL: postgres://bindkey:bindkey@localhost:5432/bindkey
-        PWD_ENCRYPTION_KEY: ${{ secrets.PWD_ENCRYPTION_KEY }}
+        PWD_ENCRYPTION_KEY: ${{ secrets.PWD_ENCRYPTION_KEY || '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f' }}
+        # AJOUT : Variables Root CA nécessaires pour l'initialisation du AppState
+        ROOT_CA_CERT_PEM: "DUMMY_CERT_FOR_CI"
+        ROOT_CA_KEY_PEM: "DUMMY_KEY_FOR_CI"
         TLS_CERT_PATH: ./cert.pem
         TLS_KEY_PATH: ./key.pem
         RUST_LOG: debug
@@ -75,13 +82,14 @@ jobs:
         echo "⏳ Attente du signal de démarrage..."
         TIMEOUT=60
         while [ $TIMEOUT -gt 0 ]; do
-          # CORRECTION : grep -qi (ignore case) et .* pour gérer les espaces doubles
+          # On cherche le log qui indique que le serveur est prêt
           if grep -qi "BindKey SERVER.*running" server_output.log; then
             echo "✅ SUCCESS : Serveur en ligne et migrations OK !"
             kill $SERVER_PID
             exit 0
           fi
 
+          # Vérification si le processus est toujours en vie
           if ! kill -0 $SERVER_PID 2>/dev/null; then
             echo "❌ CRITICAL FAILURE : Le serveur a crashé !"
             echo "--- LOGS DU SERVEUR ---"
@@ -122,7 +130,6 @@ jobs:
         context: .
         file: ./Dockerfile
         push: true
-        # On pousse 'latest' (pour Keel) et le 'SHA' (pour l'historique)
         tags: |
           ${{ env.SERVER_IMAGE }}:latest
           ${{ env.SERVER_IMAGE }}:${{ github.sha }}
