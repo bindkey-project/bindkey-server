@@ -6,7 +6,7 @@ use axum::{
 use serde_json::{Value, json};
 use tower::util::ServiceExt;
 use uuid::Uuid;
- 
+use bindkey_server::api::middleware::ca::generate_root_ca;
 use bindkey_server::create_app_instance;
  
 // ─────────────────────────────────────────────────────────────
@@ -16,6 +16,16 @@ use bindkey_server::api::middleware::chiffrer_aes;
  
 #[tokio::test]
 async fn test_full_security_and_enrollment_flow() {
+    // --- NOUVEAU : Initialisation de l'identité Root pour le test ---
+    let (cert, key) = generate_root_ca();
+    // SAFETY: On définit les variables au tout début du test 
+    // avant qu'aucun autre thread ne soit lancé.
+    unsafe {
+        std::env::set_var("ROOT_CA_CERT_PEM", cert);
+        std::env::set_var("ROOT_CA_KEY_PEM", key);
+        std::env::set_var("PWD_ENCRYPTION_KEY", "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+    }
+    
     let app = create_app_instance().await;
  
     // ÉTAPE 1 : CRÉATION DE L'UTILISATEUR
