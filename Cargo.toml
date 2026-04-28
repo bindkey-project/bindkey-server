@@ -50,6 +50,7 @@ rand = "0.9.2"
 
 # Pour générer des certificats TLS auto-signés
 rcgen = "0.13"
+ring = "0.17"
 # Chiffrement AES-256-GCM (Chiffrement des hashs)
 aes-gcm = "0.10.3"
 # Pour l'encodage des données chiffrées en texte stockable

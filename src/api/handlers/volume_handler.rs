@@ -156,50 +156,41 @@ pub async fn create_volume(
     Json(payload): Json<CreateVolumeRequest>,
 ) -> Result<(StatusCode, Json<CreateVolumeResponse>), (StatusCode, String)> {
     
-    // 1. Conversion du String ("bindkey-vol-000x") reçu en Uuid (16 octets) pour la DB
+    // 1. Conversion String -> UUID
     let vol_uuid = Uuid::from_bytes(
         payload.id.as_bytes().try_into()
-        .map_err(|_| {
-            tracing::error!("ID invalide reçu (doit faire 16 octets): {}", payload.id);
-            (StatusCode::BAD_REQUEST, "Format d'ID invalide".into())
-        })?
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Format d'ID invalide".into()))?
     );
 
-    // 2. Récupération de la BindKey la plus récente pour cet utilisateur
-    // Cette valeur remplira la nouvelle colonne 'bindkey_id'
+    // 2. Récupération de la BindKey
     let bindkey_id: Uuid = sqlx::query_scalar(
         "SELECT id FROM bindkeys WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1"
     )
     .bind(auth.user_id)
     .fetch_one(&state.db)
     .await
-    .map_err(|_| {
-        tracing::error!("Tentative de création de volume sans BindKey pour l'user: {}", auth.user_id);
-        (StatusCode::NOT_FOUND, "Aucune BindKey active trouvée. Créez une BindKey avant de créer un volume.".into())
-    })?;
+    .map_err(|_| (StatusCode::NOT_FOUND, "BindKey manquante".into()))?;
 
-    // 3. Insertion SQL avec la nouvelle colonne 'bindkey_id'
+    // 3. Insertion SQL (On a retiré encrypted_key ici)
     sqlx::query(
         r#"
-        INSERT INTO volumes (id, owner_id, bindkey_id, name, size_bytes, encrypted_key)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO volumes (id, owner_id, bindkey_id, name, size_bytes)
+        VALUES ($1, $2, $3, $4, $5)
         "#,
     )
-    .bind(vol_uuid)      // $1: ID déterministe (format bindkey-vol-XXXX)
-    .bind(auth.user_id)  // $2: Propriétaire
-    .bind(bindkey_id)    // $3: Clé associée (nouvelle colonne)
-    .bind(&payload.name) // $4: Nom du volume
-    .bind(payload.size_bytes) // $5: Taille
-    .bind("")            // $6: Clé chiffrée (vide par défaut)
+    .bind(vol_uuid)      // $1
+    .bind(auth.user_id)  // $2
+    .bind(bindkey_id)    // $3
+    .bind(&payload.name) // $4
+    .bind(payload.size_bytes) // $5
     .execute(&state.db)
     .await
     .map_err(|e| {
-        // Ce log sera visible dans ton pod API pour débugger les erreurs SQL
-        tracing::error!("CRITICAL: SQL INSERT FAILED pour le volume {}: {:?}", payload.name, e);
-        (StatusCode::INTERNAL_SERVER_ERROR, format!("Erreur lors de la création en base de données : {e}"))
+        tracing::error!("SQL INSERT FAILED: {:?}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, format!("Erreur SQL: {e}"))
     })?;
 
-    // 4. Journalisation de l'audit
+    // 4. Audit
     let _ = write_audit_log(
         &state,
         Some(auth.user_id),
@@ -209,9 +200,6 @@ pub async fn create_volume(
         AuditSeverity::INFO,
     ).await;
 
-    tracing::info!("Succès: Volume '{}' (ID: {}) créé pour l'utilisateur {}", payload.name, payload.id, auth.user_id);
-
-    // 5. Réponse structurée (ID renvoyé en String pour ton logiciel)
     Ok((
         StatusCode::CREATED,
         Json(CreateVolumeResponse {
