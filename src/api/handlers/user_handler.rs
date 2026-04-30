@@ -271,7 +271,7 @@ pub struct UserListItem {
 /// DTO représentant la BindKey d'un utilisateur dans l'espace admin.
 ///
 /// Important :
-/// - `serial_number` côté API correspond ici à `bindkey_uid` côté base de données.
+/// - `serial_number` côté API correspond ici à la colonne `sn` côté base (SN ATECC608).
 /// - On garde ce nom pour coller au format attendu par le front.
 #[derive(serde::Serialize)]
 pub struct AdminBindkeyDto {
@@ -374,7 +374,7 @@ pub async fn admin_search_user(
             u.last_name,
             u.email,
             u.role::text AS role,
-            b.bindkey_uid,
+            b.sn,
             b.status::text AS bindkey_status
         FROM users u
         LEFT JOIN bindkeys b
@@ -405,8 +405,8 @@ pub async fn admin_search_user(
     // 5. Lecture des colonnes de BindKey
     // ------------------------------------------------------------------
     //
-    // Comme on a un LEFT JOIN, bindkey_uid et bindkey_status peuvent être NULL.
-    let bindkey_uid: Option<String> = row.try_get("bindkey_uid").ok();
+    // Comme on a un LEFT JOIN, sn et bindkey_status peuvent être NULL.
+    let sn: Option<String> = row.try_get("sn").ok();
     let bindkey_status: Option<String> = row.try_get("bindkey_status").ok();
 
     // ------------------------------------------------------------------
@@ -418,7 +418,7 @@ pub async fn admin_search_user(
         last_name: row.get("last_name"),
         email: row.get("email"),
         role: row.get("role"),
-        bindkey: match (bindkey_uid, bindkey_status) {
+        bindkey: match (sn, bindkey_status) {
             (Some(serial_number), Some(status)) => Some(AdminBindkeyDto {
                 serial_number,
                 status,
@@ -438,9 +438,9 @@ pub struct FullRegisterRequest {
     pub password: String,
     pub user_role: String,
     pub bindkey_status: String,
-    pub public_key: String, // PUB_SIGN — pubkey ECDSA P-256 (slot 0)
+    pub pub_sign: String,   // PUB_SIGN — pubkey ECDSA P-256 (slot 0)
     pub pub_ecdh: String,   // PUB_ECDH — pubkey ECDH P-256 (slot 1), requis pour partage de volumes
-    pub bindkey_uid:String,
+    pub sn: String,         // SN ATECC608 (9 bytes)
 }
 #[derive(serde::Serialize)]
 pub struct FullRegisterResponse {
@@ -509,15 +509,15 @@ pub async fn register_user_with_key(
     sqlx::query(
     r#"
     INSERT INTO bindkeys (
-        id, user_id, bindkey_uid, public_key, pub_ecdh, status
+        id, user_id, sn, pub_sign, pub_ecdh, status
     )
     VALUES ($1, $2, $3, $4, $5, $6::text::bindkey_status)
     "#
     )
     .bind(bindkey_id)
     .bind(user_id)
-    .bind(&payload.bindkey_uid)
-    .bind(&payload.public_key)
+    .bind(&payload.sn)
+    .bind(&payload.pub_sign)
     .bind(&payload.pub_ecdh)
     .bind(&payload.bindkey_status)
     .execute(&mut *tx)

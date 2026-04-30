@@ -12,6 +12,9 @@ pub mod volume;
 // Modèle pour la table `volume_permissions` (droits d’accès aux volumes)
 pub mod volume_permission;
 
+// Modèle pour la table `volume_shares` (partages de volumes entre BindKeys)
+pub mod volume_share;
+
 // Modèle pour la table `bindkey_reset` (historique des réinitialisations)
 pub mod bindkey_reset;
 

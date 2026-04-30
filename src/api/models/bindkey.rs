@@ -29,13 +29,15 @@ pub struct Bindkey {
     /// Option<Uuid> si la colonne SQL `user_id` est nullable.
     pub user_id: Option<Uuid>,
 
-    /// Identifiant unique interne du périphérique (USB/BIO).
-    pub bindkey_uid: String,
+    /// SN ATECC608 (9 bytes) — identité du device utilisée partout dans le protocole.
+    /// Anciennement nommé `bindkey_uid`, renommé pour s'aligner sur le firmware.
+    pub sn: String,
 
-    /// Clé publique associée (signature / chiffrement).
-    pub public_key: String,
+    /// Pubkey ECDSA P-256 (slot 0 ATECC608) — vérification des signatures du device.
+    /// Anciennement nommée `public_key`, renommée pour s'aligner sur le firmware.
+    pub pub_sign: String,
 
-    /// Pubkey ECDH P-256 (slot 1 ATECC608), encodée comme `public_key`.
+    /// Pubkey ECDH P-256 (slot 1 ATECC608), encodée comme `pub_sign`.
     /// Nullable pour les BindKeys enrôlées avant l'ajout du partage de volumes.
     pub pub_ecdh: Option<String>,
 

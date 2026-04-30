@@ -2,3 +2,4 @@
 tls.key
 tls.crt
 .env
+share_server.md

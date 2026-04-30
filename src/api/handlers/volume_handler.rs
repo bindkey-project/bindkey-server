@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(serde::Deserialize)]
 pub struct PrepareVolumeRequest {
-    pub public_key: String,
+    pub pub_sign: String,
 }
 
 #[derive(serde::Serialize)]
@@ -77,8 +77,8 @@ pub async fn prepare_volume(
     State(state): State<AppState>,
     Json(payload): Json<PrepareVolumeRequest>,
 ) -> Result<Json<PrepareVolumeResponse>, (StatusCode, String)> {
-    let row = sqlx::query("SELECT id, user_id FROM bindkeys WHERE public_key = $1")
-        .bind(&payload.public_key)
+    let row = sqlx::query("SELECT id, user_id FROM bindkeys WHERE pub_sign = $1")
+        .bind(&payload.pub_sign)
         .fetch_one(&state.db)
         .await
         .map_err(|_| (StatusCode::NOT_FOUND, "BindKey not found".into()))?;

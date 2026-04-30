@@ -161,7 +161,7 @@ pub async fn verify_session(
     let row = sqlx::query(
         r#"
         SELECT s.user_id, s.bindkey_id, s.auth_challenge,
-               b.public_key, u.first_name, u.role::text AS role
+               b.pub_sign, u.first_name, u.role::text AS role
         FROM sessions s
         JOIN users u ON u.id = s.user_id
         JOIN bindkeys b ON b.id = s.bindkey_id
@@ -177,7 +177,7 @@ pub async fn verify_session(
     let user_id: Uuid = row.get("user_id");
     let bindkey_id: Uuid = row.get("bindkey_id");
     let challenge: String = row.get("auth_challenge"); 
-    let public_key_raw: String = row.get("public_key");
+    let public_key_raw: String = row.get("pub_sign");
 
     // 2. Décodage adaptatif de la clé publique (Hexa ou Base64)
     let mut pub_key_bytes = if let Ok(hex_bytes) = hex::decode(public_key_raw.trim()) {

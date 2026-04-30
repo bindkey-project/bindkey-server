@@ -44,8 +44,8 @@ use crate::api::audit::{AuditSeverity, write_audit_log};
 #[derive(serde::Deserialize)]
 pub struct EnrollBindkeyRequest {
     pub user_id: Uuid,                // Utilisateur propriétaire de la BindKey
-    pub bindkey_uid: String,          // SN ATECC608 (9 bytes), identifiant matériel unique
-    pub public_key: String,           // PUB_SIGN — pubkey ECDSA P-256 (slot 0)
+    pub sn: String,                   // SN ATECC608 (9 bytes), identité du device
+    pub pub_sign: String,             // PUB_SIGN — pubkey ECDSA P-256 (slot 0)
     pub pub_ecdh: String,             // PUB_ECDH — pubkey ECDH P-256 (slot 1), requis pour partage de volumes
 }
  
@@ -74,7 +74,7 @@ pub async fn enroll_bindkey(
     // 2. Requête SQL d’insertion
     let query = r#"
         INSERT INTO bindkeys (
-            id, user_id, bindkey_uid, public_key, pub_ecdh, status
+            id, user_id, sn, pub_sign, pub_ecdh, status
         )
         VALUES ($1, $2, $3, $4, $5, 'ACTIVE')
     "#;
@@ -83,8 +83,8 @@ pub async fn enroll_bindkey(
     sqlx::query(query)
         .bind(bindkey_id)
         .bind(payload.user_id)
-        .bind(&payload.bindkey_uid)
-        .bind(&payload.public_key)
+        .bind(&payload.sn)
+        .bind(&payload.pub_sign)
         .bind(&payload.pub_ecdh)
         .execute(&state.db)
         .await
@@ -236,7 +236,7 @@ pub async fn update_bindkey_status(
 /// Change le statut d'une BindKey à partir de son serial_number.
 ///
 /// IMPORTANT :
-/// - `serial_number` côté API correspond à `bindkey_uid` en base.
+/// - `serial_number` côté API correspond à la colonne `sn` en base (SN ATECC608).
 /// - seules les valeurs de l'enum BindkeyStatus sont acceptées :
 ///   ACTIVE, RESET, LOST, BROKEN
 ///
@@ -272,13 +272,13 @@ pub async fn admin_update_bindkey_status_by_serial(
     // 3. Mise à jour de la BindKey
     // ------------------------------------------------------------------
     //
-    // On met à jour le statut en recherchant la BindKey par bindkey_uid
-    // (qui joue ici le rôle de serial_number côté API).
+    // On met à jour le statut en recherchant la BindKey par SN
+    // (le SN joue le rôle de serial_number côté API).
     let res = sqlx::query(
         r#"
         UPDATE bindkeys
         SET status = $1
-        WHERE bindkey_uid = $2
+        WHERE sn = $2
         "#
     )
     .bind(payload.status)
@@ -409,24 +409,24 @@ pub async fn generate_certificate_for_bindkey(
         return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
     }
 
-    // 1. Récupère user_id ET public_key de la BindKey en une seule requête
+    // 1. Récupère user_id ET pub_sign de la BindKey en une seule requête
     let row: Option<(Option<Uuid>, String)> =
-        sqlx::query_as("SELECT user_id, public_key FROM bindkeys WHERE id = $1")
+        sqlx::query_as("SELECT user_id, pub_sign FROM bindkeys WHERE id = $1")
             .bind(bindkey_id)
             .fetch_optional(&state.db)
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
-    let (user_id_opt, public_key) =
+    let (user_id_opt, pub_sign) =
         row.ok_or((StatusCode::NOT_FOUND, "BindKey not found".into()))?;
     let user_id = user_id_opt.unwrap_or(Uuid::nil());
 
-    // 2. Signature d'un certificat autour de la clé publique de la BindKey.
+    // 2. Signature d'un certificat autour de la pubkey de signature de la BindKey.
     //    Aucune clé privée client n'est manipulée par le serveur.
     let certificate_pem = generate_bindkey_certificate(
         &state.ca_cert_pem,
         &state.ca_key_pem,
-        &public_key,
+        &pub_sign,
         &bindkey_id.to_string(),
         &user_id.to_string(),
     )

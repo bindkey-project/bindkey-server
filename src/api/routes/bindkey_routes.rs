@@ -86,7 +86,7 @@ pub fn bindkey_routes() -> Router<crate::db::AppState> {
         // Route ADMIN :
         // Permet de modifier le statut d’une BindKey à partir de son identifiant matériel (serial_number)
         //
-        // - serial_number côté API = bindkey_uid en base
+        // - serial_number côté API = colonne `sn` en base (SN ATECC608)
         //
         // Utilisé pour :
         // - déclarer une clé perdue

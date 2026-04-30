@@ -68,12 +68,13 @@ async fn test_full_security_and_enrollment_flow() {
     println!("\n--- ÉTAPE 1 : USER CRÉÉ ({}) ---", user_id);
  
     // ÉTAPE 2 : ENRÔLEMENT DE LA BINDKEY
-    let shared_bindkey_uid = format!("BK-STORY1-{}", Uuid::new_v4());
+    let shared_sn = format!("BK-STORY1-{}", Uuid::new_v4());
     let enroll_payload = json!({
         "user_id": user_id,
-        "bindkey_uid": shared_bindkey_uid,
+        "sn": shared_sn,
         // ⚠️ à adapter si votre endpoint attend une vraie clé base64
-        "public_key": "pub_key_secure_2026",
+        "pub_sign": "pub_key_secure_2026",
+        "pub_ecdh": "pub_ecdh_secure_2026",
         "fingerprint_template": "biometric_template_hash"
     });
  
@@ -231,7 +232,7 @@ async fn test_get_user_bindkeys_list_content() {
     let user_data: Value = serde_json::from_slice(&body_bytes).unwrap();
     let user_id_str = user_data["id"].as_str().expect("Pas d'ID");
  
-    let bindkey_uid = format!("BK-LIST-{}", Uuid::new_v4());
+    let sn = format!("BK-LIST-{}", Uuid::new_v4());
     app.clone()
         .oneshot(
             Request::builder()
@@ -241,8 +242,9 @@ async fn test_get_user_bindkeys_list_content() {
                 .body(Body::from(
                     serde_json::to_vec(&json!({
                         "user_id": user_id_str,
-                        "bindkey_uid": bindkey_uid,
-                        "public_key": "key_list_test",
+                        "sn": sn,
+                        "pub_sign": "key_list_test",
+                        "pub_ecdh": "ecdh_list_test",
                         "fingerprint_template": "template_list_test"
                     }))
                     .unwrap(),
@@ -273,7 +275,7 @@ async fn test_get_user_bindkeys_list_content() {
  
     assert!(status.is_success());
     assert!(!list.is_empty(), "La liste ne devrait pas être vide !");
-    assert_eq!(list[0]["bindkey_uid"], bindkey_uid);
+    assert_eq!(list[0]["sn"], sn);
 }
 
 // ─────────────────────────────────────────────────────────────
