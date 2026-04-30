@@ -182,14 +182,55 @@ pub async fn get_user_by_email(
     if !require_role(&auth.role, &UserRole::ENROLLER) {
         return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
     }
- 
+
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
         .bind(&q.email)
         .fetch_one(&state.db)
         .await
         .map_err(|_| (StatusCode::NOT_FOUND, "User not found".into()))?;
- 
+
     Ok(Json(user))
+}
+
+//
+// ─────────────────────────────────────────────────────────────
+// GET /users/search?email=...
+// ─────────────────────────────────────────────────────────────
+//
+// Recherche minimale (first_name, last_name, email, role) pour les flux
+// utilisateur-utilisateur — typiquement le partage de volume où l'app source
+// doit résoudre un email saisi par l'user en BindKey cible côté serveur.
+//
+// Accessible à TOUT utilisateur authentifié (le middleware d'auth garantit
+// déjà la connexion ; pas de RBAC supplémentaire).
+
+#[derive(serde::Serialize, sqlx::FromRow)]
+pub struct UserSearchResponse {
+    pub first_name: String,
+    pub last_name: String,
+    pub email: String,
+    pub role: UserRole,
+}
+
+pub async fn search_user_by_email(
+    Extension(_auth): Extension<AuthUser>,
+    State(state): State<AppState>,
+    Query(q): Query<UserEmailQuery>,
+) -> Result<Json<UserSearchResponse>, (StatusCode, String)> {
+    if q.email.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "email is required".into()));
+    }
+
+    let resp = sqlx::query_as::<_, UserSearchResponse>(
+        "SELECT first_name, last_name, email, role FROM users WHERE email = $1",
+    )
+    .bind(&q.email)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?
+    .ok_or((StatusCode::NOT_FOUND, "User not found".into()))?;
+
+    Ok(Json(resp))
 }
  
 //

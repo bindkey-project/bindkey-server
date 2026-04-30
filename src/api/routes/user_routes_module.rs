@@ -18,6 +18,7 @@ use crate::api::handlers::user_handler::{
     get_user_by_id,
     list_users,
     register_user_with_key,
+    search_user_by_email,
     update_user_status,
 };
 
@@ -26,8 +27,12 @@ pub fn user_routes() -> Router<crate::db::AppState> {
     Router::new()
 
         // POST /users -> création d’un utilisateur
-        // GET /users?email=... -> rechercher par email
+        // GET /users?email=... -> rechercher par email (renvoie le User complet, ENROLLER+)
         .route("/users", post(create_user).get(get_user_by_email))
+
+        // GET /users/search?email=... -> recherche minimale (first_name, last_name, email, role)
+        // Accessible à tout utilisateur authentifié.
+        .route("/users/search", get(search_user_by_email))
 
         // GET /users/:id -> récupérer un utilisateur
         .route("/users/:id", get(get_user_by_id))
