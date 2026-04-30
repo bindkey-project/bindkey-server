@@ -206,8 +206,8 @@ pub async fn get_user_by_email(
 
 #[derive(serde::Serialize, sqlx::FromRow)]
 pub struct UserSearchResponse {
-    pub first_name: String,
-    pub last_name: String,
+    /// Nom complet `first_name + " " + last_name` (concat SQL).
+    pub name: String,
     pub email: String,
     pub role: UserRole,
 }
@@ -222,7 +222,11 @@ pub async fn search_user_by_email(
     }
 
     let resp = sqlx::query_as::<_, UserSearchResponse>(
-        "SELECT first_name, last_name, email, role FROM users WHERE email = $1",
+        r#"
+        SELECT first_name || ' ' || last_name AS name, email, role
+        FROM users
+        WHERE email = $1
+        "#,
     )
     .bind(&q.email)
     .fetch_optional(&state.db)
