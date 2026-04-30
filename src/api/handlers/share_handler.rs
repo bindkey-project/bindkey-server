@@ -171,13 +171,13 @@ pub async fn request_share(
     .await;
 
     if let Err(e) = insert_res {
-        if let Some(db_err) = e.as_database_error() {
-            if db_err.code() == Some(std::borrow::Cow::Borrowed("23505")) {
-                return Err((
-                    StatusCode::CONFLICT,
-                    "slot pris en concurrence, rejouer la requête".into(),
-                ));
-            }
+        if let Some(db_err) = e.as_database_error()
+            && db_err.code() == Some(std::borrow::Cow::Borrowed("23505"))
+        {
+            return Err((
+                StatusCode::CONFLICT,
+                "slot pris en concurrence, rejouer la requête".into(),
+            ));
         }
         return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")));
     }
