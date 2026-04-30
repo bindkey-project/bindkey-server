@@ -17,8 +17,8 @@ use crate::api::middleware::auth_middleware::auth_middleware;
 
 // Import des différents groupes de routes
 use crate::api::routes::{
-    bindkey_routes, mount_routes, permission_routes, session_routes, user_routes,
-    volume_routes,
+    bindkey_routes, mount_routes, permission_routes, session_routes, share_routes,
+    user_routes, volume_routes,
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -36,7 +36,8 @@ pub fn create_app(state: AppState) -> Router {
         .merge(bindkey_routes())
         .merge(volume_routes())
         .merge(mount_routes())
-        .merge(permission_routes());
+        .merge(permission_routes())
+        .merge(share_routes());
 
     // 3. Application CONDITIONNELLE du middleware
     // 'not(test)' signifie : inclus ce code pour 'cargo run' mais IGNORE-LE pour 'cargo test'

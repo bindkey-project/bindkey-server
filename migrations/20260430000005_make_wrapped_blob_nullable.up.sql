@@ -1,0 +1,11 @@
+-- Pré-réservation du slot à /share_request : on persiste la ligne immédiatement
+-- (avec slot alloué) mais wrapped_blob est encore inconnu (la BK source n'a pas
+-- encore wrappé). On finalise à /share_complete via UPDATE.
+--
+-- État implicite :
+--   wrapped_blob IS NULL       → réservé, en attente du complete
+--   wrapped_blob = 60 bytes    → wrap reçu, en attente de livraison à la cible
+--
+-- La CHECK octet_length=60 existante reste valide : octet_length(NULL) → NULL,
+-- et un CHECK accepte NULL (PostgreSQL : "satisfied if true or null").
+ALTER TABLE volume_shares ALTER COLUMN wrapped_blob DROP NOT NULL;
