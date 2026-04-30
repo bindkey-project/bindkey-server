@@ -12,14 +12,13 @@ pub fn generate_root_ca() -> (String, String) {
     dn.push(DnType::CommonName, "BindKey Root Authority");
     dn.push(DnType::OrganizationName, "BindKey Security");
     params.distinguished_name = dn;
-
     params.is_ca = IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
     params.key_usages = vec![
         KeyUsagePurpose::KeyCertSign,
         KeyUsagePurpose::CrlSign,
     ];
 
-    let key_pair = KeyPair::generate().unwrap();
+    let key_pair = KeyPair::generate().unwrap();        
     let cert = params.self_signed(&key_pair).unwrap();
 
     (cert.pem(), key_pair.serialize_pem())

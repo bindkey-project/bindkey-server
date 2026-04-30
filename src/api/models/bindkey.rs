@@ -35,6 +35,10 @@ pub struct Bindkey {
     /// Clé publique associée (signature / chiffrement).
     pub public_key: String,
 
+    /// Pubkey ECDH P-256 (slot 1 ATECC608), encodée comme `public_key`.
+    /// Nullable pour les BindKeys enrôlées avant l'ajout du partage de volumes.
+    pub pub_ecdh: Option<String>,
+
     /// Statut de la Bindkey (ENUM SQL `bindkey_status`).
     pub status: BindkeyStatus,
 

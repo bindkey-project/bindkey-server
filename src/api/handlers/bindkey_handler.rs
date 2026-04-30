@@ -44,8 +44,9 @@ use crate::api::audit::{AuditSeverity, write_audit_log};
 #[derive(serde::Deserialize)]
 pub struct EnrollBindkeyRequest {
     pub user_id: Uuid,                // Utilisateur propriétaire de la BindKey
-    pub bindkey_uid: String,          // Identifiant matériel unique
-    pub public_key: String,           // Clé publique (crypto)
+    pub bindkey_uid: String,          // SN ATECC608 (9 bytes), identifiant matériel unique
+    pub public_key: String,           // PUB_SIGN — pubkey ECDSA P-256 (slot 0)
+    pub pub_ecdh: String,             // PUB_ECDH — pubkey ECDH P-256 (slot 1), requis pour partage de volumes
 }
  
 /// Réponse envoyée après enrôlement réussi
@@ -73,17 +74,18 @@ pub async fn enroll_bindkey(
     // 2. Requête SQL d’insertion
     let query = r#"
         INSERT INTO bindkeys (
-            id, user_id, bindkey_uid, public_key, status
+            id, user_id, bindkey_uid, public_key, pub_ecdh, status
         )
-        VALUES ($1, $2, $3, $4, 'ACTIVE')
+        VALUES ($1, $2, $3, $4, $5, 'ACTIVE')
     "#;
- 
+
     // 3. Exécution SQL avec gestion fine des erreurs
     sqlx::query(query)
         .bind(bindkey_id)
         .bind(payload.user_id)
         .bind(&payload.bindkey_uid)
         .bind(&payload.public_key)
+        .bind(&payload.pub_ecdh)
         .execute(&state.db)
         .await
         .map_err(|e| {

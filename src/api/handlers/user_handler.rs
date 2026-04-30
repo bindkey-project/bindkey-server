@@ -438,7 +438,8 @@ pub struct FullRegisterRequest {
     pub password: String,
     pub user_role: String,
     pub bindkey_status: String,
-    pub public_key: String, // On va la convertir en Base64 pour être compatible
+    pub public_key: String, // PUB_SIGN — pubkey ECDSA P-256 (slot 0)
+    pub pub_ecdh: String,   // PUB_ECDH — pubkey ECDH P-256 (slot 1), requis pour partage de volumes
     pub bindkey_uid:String,
 }
 #[derive(serde::Serialize)]
@@ -508,15 +509,16 @@ pub async fn register_user_with_key(
     sqlx::query(
     r#"
     INSERT INTO bindkeys (
-        id, user_id, bindkey_uid, public_key, status
+        id, user_id, bindkey_uid, public_key, pub_ecdh, status
     )
-    VALUES ($1, $2, $3, $4, $5::text::bindkey_status)
+    VALUES ($1, $2, $3, $4, $5, $6::text::bindkey_status)
     "#
     )
     .bind(bindkey_id)
     .bind(user_id)
     .bind(&payload.bindkey_uid)
     .bind(&payload.public_key)
+    .bind(&payload.pub_ecdh)
     .bind(&payload.bindkey_status)
     .execute(&mut *tx)
     .await
