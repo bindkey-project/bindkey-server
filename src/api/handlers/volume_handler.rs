@@ -367,32 +367,8 @@ pub async fn get_volume_key(
 
     let is_owner = owner_id == auth.user_id;
     let is_admin = require_role(&auth.role, &UserRole::ADMIN);
-    let mut has_permission = false;
 
     if !is_owner && !is_admin {
-        let perm = sqlx::query_scalar::<_, i64>(
-            r#"
-            SELECT 1
-            FROM volume_permissions
-            WHERE volume_id = $1
-              AND grantee_id = $2
-              AND status = 'ACTIVE'
-              AND (expires_at IS NULL OR expires_at > now())
-            LIMIT 1
-            "#,
-        )
-        .bind(volume_id)
-        .bind(auth.user_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
-
-        if perm.is_some() {
-            has_permission = true;
-        }
-    }
-
-    if !is_owner && !is_admin && !has_permission {
         write_audit_log(
             &state,
             Some(auth.user_id),

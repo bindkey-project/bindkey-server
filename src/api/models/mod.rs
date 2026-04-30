@@ -7,9 +7,6 @@ pub mod bindkey;
 // Modèle pour la table `volumes` (espaces de stockage logiques)
 pub mod volume;
 
-// Modèle pour la table `volume_permissions` (droits d’accès aux volumes)
-pub mod volume_permission;
-
 // Modèle pour la table `volume_shares` (partages de volumes entre BindKeys)
 pub mod volume_share;
 
