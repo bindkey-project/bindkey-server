@@ -7,6 +7,7 @@ use axum::{
 use uuid::Uuid;
  
 use crate::api::auth::{AuthUser, require_role};
+use crate::api::models::bindkey::BindkeyStatus;
 use crate::api::models::user::{User, UserRole, UserStatus};
 use crate::db::AppState;
  
@@ -436,8 +437,8 @@ pub struct FullRegisterRequest {
     pub last_name: String,
     pub email: String,
     pub password: String,
-    pub user_role: String,
-    pub bindkey_status: String,
+    pub user_role: UserRole,
+    pub bindkey_status: BindkeyStatus,
     pub pub_sign: String,   // PUB_SIGN — pubkey ECDSA P-256 (slot 0)
     pub pub_ecdh: String,   // PUB_ECDH — pubkey ECDH P-256 (slot 1), requis pour partage de volumes
     pub sn: String,         // SN ATECC608 (9 bytes)
@@ -482,8 +483,7 @@ pub async fn register_user_with_key(
     let argon2_hash = middleware::hachage_argon2::hasher_mot_de_passe(&payload.password);
     let encrypted_password = middleware::aes_chiffrement::chiffrer_aes(&argon2_hash);
  
-    // 5. INSERT USER
-    // On caste le rôle dynamiquement vers l'enum Postgres
+    // 5. INSERT USER (UserRole bindé directement, plus de cast text::user_role)
     sqlx::query(
         r#"
         INSERT INTO users (
@@ -491,38 +491,44 @@ pub async fn register_user_with_key(
             role, status, password_hash, recovery_code_hash,
             created_at, updated_at
         )
-        VALUES ($1, $2, $3, $4, $5::text::user_role, 'ACTIVE', $6, $7, now(), now())
+        VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6, $7, now(), now())
         "#
     )
     .bind(user_id)
     .bind(&payload.first_name)
     .bind(&payload.last_name)
     .bind(&payload.email)
-    .bind(&payload.user_role)
+    .bind(payload.user_role)
     .bind(encrypted_password)
     .bind(recovery_code_hash)
     .execute(&mut *tx)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("User SQL Error: {e}")))?;
- 
-    // 6. INSERT BINDKEY
+    .map_err(|e| {
+        tracing::error!("INSERT users failed: {e}");
+        (StatusCode::INTERNAL_SERVER_ERROR, format!("User SQL Error: {e}"))
+    })?;
+
+    // 6. INSERT BINDKEY (BindkeyStatus bindé directement, plus de cast)
     sqlx::query(
-    r#"
-    INSERT INTO bindkeys (
-        id, user_id, sn, pub_sign, pub_ecdh, status
-    )
-    VALUES ($1, $2, $3, $4, $5, $6::text::bindkey_status)
-    "#
+        r#"
+        INSERT INTO bindkeys (
+            id, user_id, sn, pub_sign, pub_ecdh, status
+        )
+        VALUES ($1, $2, $3, $4, $5, $6)
+        "#,
     )
     .bind(bindkey_id)
     .bind(user_id)
     .bind(&payload.sn)
     .bind(&payload.pub_sign)
     .bind(&payload.pub_ecdh)
-    .bind(&payload.bindkey_status)
+    .bind(payload.bindkey_status.clone())
     .execute(&mut *tx)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("BindKey SQL Error: {e}")))?;
+    .map_err(|e| {
+        tracing::error!("INSERT bindkeys failed: {e}");
+        (StatusCode::INTERNAL_SERVER_ERROR, format!("BindKey SQL Error: {e}"))
+    })?;
  
     // 7. Validation de la transaction
     tx.commit().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
