@@ -37,8 +37,10 @@ pub struct VolumeShare {
     /// SMALLINT côté SQL → i16 côté Rust.
     pub target_slot: i16,
 
-    /// Bundle chiffré opaque (nonce || ciphertext || tag), 60 bytes exactement.
-    pub wrapped_blob: Vec<u8>,
+    /// Bundle chiffré opaque (nonce || ciphertext || tag), 60 bytes exactement
+    /// une fois rempli. NULL pendant l'état "réservé" (entre /share_request et
+    /// /share_complete).
+    pub wrapped_blob: Option<Vec<u8>>,
 
     /// Statut de livraison.
     pub status: VolumeShareStatus,

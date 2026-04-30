@@ -36,6 +36,9 @@ pub mod session_routes;
 // Routes de traçabilité des montages / démontages
 pub mod mount_routes;
 
+// Routes de partage de volumes entre BindKeys (cf. share_server.md)
+pub mod share_routes;
+
 // ─────────────────────────────────────────────────────────────
 // Ré-export des routeurs spécialisés
 // ─────────────────────────────────────────────────────────────
@@ -43,4 +46,5 @@ pub mod mount_routes;
 pub use mount_routes::mount_routes;
 pub use permission_routes::permission_routes;
 pub use session_routes::session_routes;
+pub use share_routes::share_routes;
 pub use volume_routes::volume_routes;

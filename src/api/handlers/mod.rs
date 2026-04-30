@@ -4,5 +4,6 @@ pub mod bindkey_handler;
 pub mod mount_handler;
 pub mod permission_handler;
 pub mod session_handler;
+pub mod share_handler;
 pub mod user_handler;
 pub mod volume_handler;
