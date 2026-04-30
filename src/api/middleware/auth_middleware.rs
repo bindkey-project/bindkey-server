@@ -20,32 +20,35 @@ pub async fn auth_middleware(
     next: Next,
 ) -> Result<Response, (StatusCode, String)> {
     // --- BLOC CORRIGÉ POUR LES TESTS ---
-   if cfg!(feature = "skip-auth") {
-    // En mode test, on injecte un vrai utilisateur existant en base
-    // pour éviter les erreurs de clé étrangère sur owner_id, created_by, etc.
-    let maybe_user = sqlx::query_as::<_, (Uuid,)>(
-        r#"
+    if cfg!(feature = "skip-auth") {
+        // En mode test, on injecte un vrai utilisateur existant en base
+        // pour éviter les erreurs de clé étrangère sur owner_id, created_by, etc.
+        let maybe_user = sqlx::query_as::<_, (Uuid,)>(
+            r#"
         SELECT id
         FROM users
         ORDER BY created_at ASC
         LIMIT 1
-        "#
-    )
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Test auth SQL error: {e}")))?;
+        "#,
+        )
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Test auth SQL error: {e}"),
+            )
+        })?;
 
-    let user_id = maybe_user
-        .map(|row| row.0)
-        .unwrap_or(Uuid::nil());
+        let user_id = maybe_user.map(|row| row.0).unwrap_or(Uuid::nil());
 
-    req.extensions_mut().insert(AuthUser {
-        user_id,
-        role: UserRole::ADMIN,
-    });
+        req.extensions_mut().insert(AuthUser {
+            user_id,
+            role: UserRole::ADMIN,
+        });
 
-    return Ok(next.run(req).await);
-}
+        return Ok(next.run(req).await);
+    }
     // ------------------------------------
     // 1) Lire le header Authorization
     let auth_header = req

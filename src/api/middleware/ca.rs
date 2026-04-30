@@ -1,10 +1,9 @@
+use base64::Engine;
 use rcgen::{
-    CertificateParams, DistinguishedName, DnType, IsCa, KeyPair,
-    KeyUsagePurpose, RemoteKeyPair, SignatureAlgorithm, PKCS_ECDSA_P256_SHA256,
-    Error as RcgenError,
+    CertificateParams, DistinguishedName, DnType, Error as RcgenError, IsCa, KeyPair,
+    KeyUsagePurpose, PKCS_ECDSA_P256_SHA256, RemoteKeyPair, SignatureAlgorithm,
 };
 use time::{Duration, OffsetDateTime};
-use base64::Engine;
 
 pub fn generate_root_ca() -> (String, String) {
     let mut params = CertificateParams::default();
@@ -13,21 +12,21 @@ pub fn generate_root_ca() -> (String, String) {
     dn.push(DnType::OrganizationName, "BindKey Security");
     params.distinguished_name = dn;
     params.is_ca = IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-    params.key_usages = vec![
-        KeyUsagePurpose::KeyCertSign,
-        KeyUsagePurpose::CrlSign,
-    ];
+    params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
 
-    let key_pair = KeyPair::generate().unwrap();        
+    let key_pair = KeyPair::generate().unwrap();
     let cert = params.self_signed(&key_pair).unwrap();
 
     (cert.pem(), key_pair.serialize_pem())
 }
 
 /// Charge la Root CA depuis ses PEM et reconstruit le Certificate signataire.
-fn load_root_ca(root_cert_pem: &str, root_key_pem: &str) -> Result<(rcgen::Certificate, KeyPair), String> {
-    let root_key_pair = KeyPair::from_pem(root_key_pem)
-        .map_err(|e| format!("Erreur clé Root CA: {e}"))?;
+fn load_root_ca(
+    root_cert_pem: &str,
+    root_key_pem: &str,
+) -> Result<(rcgen::Certificate, KeyPair), String> {
+    let root_key_pair =
+        KeyPair::from_pem(root_key_pem).map_err(|e| format!("Erreur clé Root CA: {e}"))?;
     let root_params = CertificateParams::from_ca_cert_pem(root_cert_pem)
         .map_err(|e| format!("Erreur params Root CA: {e}"))?;
     let root_cert = root_params

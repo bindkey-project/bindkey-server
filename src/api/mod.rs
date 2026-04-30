@@ -17,8 +17,7 @@ use crate::api::middleware::auth_middleware::auth_middleware;
 
 // Import des différents groupes de routes
 use crate::api::routes::{
-    bindkey_routes, mount_routes, permission_routes, session_routes, user_routes,
-    volume_routes,
+    bindkey_routes, mount_routes, permission_routes, session_routes, user_routes, volume_routes,
 };
 
 // ─────────────────────────────────────────────────────────────

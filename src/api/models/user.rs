@@ -73,5 +73,3 @@ pub enum UserStatus {
     ACTIVE,
     DISABLED,
 }
-
-

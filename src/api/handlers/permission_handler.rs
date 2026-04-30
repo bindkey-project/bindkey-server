@@ -347,7 +347,12 @@ pub async fn get_my_grants(
     .bind(auth.user_id)
     .fetch_all(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error (owner): {e}")))?;
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("SQL error (owner): {e}"),
+        )
+    })?;
 
     // 2) Volumes partagés déjà acceptés.
     let mut shared = sqlx::query_as::<_, MyGrantResponse>(
@@ -375,7 +380,12 @@ pub async fn get_my_grants(
     .bind(auth.user_id)
     .fetch_all(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error (shared): {e}")))?;
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("SQL error (shared): {e}"),
+        )
+    })?;
 
     // 3) Fusionner owned + shared.
     grants.append(&mut shared);
