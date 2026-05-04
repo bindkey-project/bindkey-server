@@ -374,8 +374,11 @@ pub struct PendingSharesQuery {
 pub struct PendingShareResponse {
     pub share_id: Uuid,
     pub source_sn: String,
+    /// Clé publique ECDH de la BindKey source — nécessaire au déchiffrement côté cible.
+    pub source_pubkey_ecdh: String,
     pub volume_id: Uuid,
-    pub target_slot: i16,
+    /// Renommé `slot` côté wire pour matcher le contrat firmware.
+    pub slot: i16,
     pub wrapped: String,
 }
 
@@ -405,16 +408,18 @@ pub async fn get_pending_shares(
     let shares = sqlx::query_as::<_, PendingShareResponse>(
         r#"
         SELECT
-            id AS share_id,
-            source_sn,
-            volume_id,
-            target_slot,
-            encode(wrapped_blob, 'hex') AS wrapped
-        FROM volume_shares
-        WHERE target_sn = $1
-          AND status = 'PENDING'
-          AND wrapped_blob IS NOT NULL
-        ORDER BY created_at ASC
+            vs.id            AS share_id,
+            vs.source_sn,
+            b.pub_ecdh       AS source_pubkey_ecdh,
+            vs.volume_id,
+            vs.target_slot   AS slot,
+            encode(vs.wrapped_blob, 'hex') AS wrapped
+        FROM volume_shares vs
+        JOIN bindkeys b ON b.sn = vs.source_sn
+        WHERE vs.target_sn = $1
+          AND vs.status = 'PENDING'
+          AND vs.wrapped_blob IS NOT NULL
+        ORDER BY vs.created_at ASC
         "#,
     )
     .bind(&query.target_sn)
