@@ -12,6 +12,7 @@ use axum::{
 use crate::api::handlers::volume_handler::{
     create_volume,     // POST   /volumes
     delete_volume,     // DELETE /volumes/:id
+    find_volume_id,    // GET    /volumes/find_id?name=...
     get_volume,        // GET    /volumes/:id
     get_volume_key,    // GET    /volumes/:id/key <-- Ajouté ici
     list_user_volumes, // GET    /users/:id/volumes
@@ -28,12 +29,18 @@ pub fn volume_routes() -> Router<crate::db::AppState> {
     Router::new()
         // --- Routes spécifiques (sans paramètres) ---
         .route("/volumes/prepare", post(prepare_volume))
-        
+
         // ─────────────────────────────────────────
         // POST /volumes/verify
         // Vérifie si un nom de volume existe déjà pour l'utilisateur
         // ─────────────────────────────────────────
         .route("/volumes/verify", post(verify_volume))
+
+        // ─────────────────────────────────────────
+        // GET /volumes/find_id?name=...
+        // Récupère l'UUID d'un volume à partir de son nom (ou de son label firmware)
+        // ─────────────────────────────────────────
+        .route("/volumes/find_id", get(find_volume_id))
 
         // ─────────────────────────────────────────
         // POST /volumes

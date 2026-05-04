@@ -1,6 +1,6 @@
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Extension, Json,
 };
@@ -65,6 +65,16 @@ pub struct GetVolumeKeyResponse {
 pub struct UpdateVolumeRequest {
     pub name: Option<String>,
     pub size_bytes: Option<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct FindVolumeIdQuery {
+    pub name: String,
+}
+
+#[derive(Serialize)]
+pub struct FindVolumeIdResponse {
+    pub volume_id: String,
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -391,5 +401,28 @@ pub async fn get_volume_key(
         volume_id,
         encrypted_key,
         key_version,
+    }))
+}
+
+pub async fn find_volume_id(
+    Extension(auth): Extension<AuthUser>,
+    State(state): State<AppState>,
+    Query(params): Query<FindVolumeIdQuery>,
+) -> Result<Json<FindVolumeIdResponse>, (StatusCode, String)> {
+    // Match sur le nom user-friendly OU le label firmware ("bindkey-vol-XXXX"),
+    // toujours scoppé au owner courant.
+    let id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM volumes WHERE owner_id = $1 AND (name = $2 OR label = $2) LIMIT 1",
+    )
+    .bind(auth.user_id)
+    .bind(&params.name)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    let id = id.ok_or((StatusCode::NOT_FOUND, "Volume non trouvé".into()))?;
+
+    Ok(Json(FindVolumeIdResponse {
+        volume_id: id.to_string(),
     }))
 }
