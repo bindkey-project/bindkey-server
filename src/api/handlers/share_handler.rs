@@ -68,7 +68,8 @@ pub struct ShareRequestResponse {
     pub target_sn: String,
     pub target_pubkey_ecdh: String,
     pub target_slot: i16,
-    pub volume_id: Uuid,
+    /// Label firmware du volume (ex: "bindkey-vol-0001"), seul format compris par la BindKey.
+    pub volume_id: String,
 }
 
 pub async fn request_share(
@@ -76,15 +77,16 @@ pub async fn request_share(
     State(state): State<AppState>,
     Json(payload): Json<ShareRequestPayload>,
 ) -> Result<Json<ShareRequestResponse>, (StatusCode, String)> {
-    // 1. Résoudre volume_name → (volume_id, source_sn) :
+    // 1. Résoudre volume_name → (volume_id UUID, volume_label firmware, source_sn) :
     //    - filtre owner_id = auth.user_id (sécurité §5)
     //    - JOIN sur bindkey_id pour récupérer le SN de la BK source du volume
-    let volume: Option<(Uuid, String)> = sqlx::query_as(
+    //    - on accepte aussi le label firmware en entrée au cas où le client envoie "bindkey-vol-XXXX"
+    let volume: Option<(Uuid, String, String)> = sqlx::query_as(
         r#"
-        SELECT v.id, b.sn
+        SELECT v.id, v.label, b.sn
         FROM volumes v
         JOIN bindkeys b ON b.id = v.bindkey_id
-        WHERE v.name = $1 AND v.owner_id = $2
+        WHERE (v.name = $1 OR v.label = $1) AND v.owner_id = $2
         ORDER BY v.created_at DESC
         LIMIT 1
         "#,
@@ -95,7 +97,7 @@ pub async fn request_share(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
-    let (volume_id, source_sn) = volume.ok_or((
+    let (volume_id, volume_label, source_sn) = volume.ok_or((
         StatusCode::NOT_FOUND,
         "volume introuvable pour cet utilisateur".into(),
     ))?;
@@ -186,7 +188,7 @@ pub async fn request_share(
         target_sn,
         target_pubkey_ecdh,
         target_slot,
-        volume_id,
+        volume_id: volume_label,
     }))
 }
 
@@ -208,7 +210,9 @@ pub async fn request_share(
 pub struct ShareCompletePayload {
     pub source_sn: String,
     pub target_sn: String,
-    pub volume_id: Uuid,
+    /// Label firmware ("bindkey-vol-XXXX") tel que renvoyé par /share_request.
+    /// Le serveur le résout en UUID interne via (owner_id, label).
+    pub volume_id: String,
     pub wrapped: String,
 }
 
@@ -240,6 +244,22 @@ pub async fn complete_share(
             "source_sn n'appartient pas à l'utilisateur authentifié".into(),
         ));
     }
+
+    // 1bis. Résoudre le label firmware → UUID interne, scoppé au owner authentifié.
+    //       Le client renvoie le label ("bindkey-vol-XXXX") qu'on lui a donné à /share_request.
+    let resolved: Option<(Uuid,)> = sqlx::query_as(
+        "SELECT id FROM volumes WHERE owner_id = $1 AND label = $2 LIMIT 1",
+    )
+    .bind(auth.user_id)
+    .bind(&payload.volume_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    let (volume_uuid,) = resolved.ok_or((
+        StatusCode::NOT_FOUND,
+        "volume_id (label) introuvable pour cet utilisateur".into(),
+    ))?;
 
     // 2. Décoder le wrapped depuis l'hex et vérifier la taille (60 bytes pile).
     let wrapped_bytes = hex::decode(payload.wrapped.trim()).map_err(|_| {
@@ -279,7 +299,7 @@ pub async fn complete_share(
     )
     .bind(&payload.source_sn)
     .bind(&payload.target_sn)
-    .bind(payload.volume_id)
+    .bind(volume_uuid)
     .bind(&wrapped_bytes)
     .fetch_optional(&state.db)
     .await
