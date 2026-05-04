@@ -2,67 +2,46 @@
 // -----------------------------------------------------------------------------
 // Volume Sharing — endpoints serveur (cf. share_server.md)
 //
-// Ce module implémente le flux fonctionnel §4 de la spec : demande, stockage
-// du wrapped, polling cible, ack. À ce stade : opérations B (request) et
-// C (complete). Le polling et l'ack arriveront dans une étape suivante.
+// Ce module implémente le flux de partage sécurisé entre BindKeys.
 //
-// Pré-réservation : à /share_request on insère déjà la ligne dans volume_shares
-// avec wrapped_blob=NULL et le slot alloué. /share_complete fait un UPDATE
-// pour poser le wrapped. Cela garantit que le slot retourné au client = slot
-// persisté, sans demander au client de renvoyer target_slot.
+// ⚠️ IMPORTANT :
+// - Le serveur ne voit JAMAIS la clé en clair
+// - Il stocke uniquement un blob chiffré (wrapped_blob)
+// - Le chiffrement est fait côté hardware (ATECC608)
+//
+// Flux global :
+//   B → /share_request     (préparation)
+//   C → /share_complete    (stockage du wrapped)
+//   D → /shares/received   (lecture côté cible)
+//   E → accept / deny      (décision utilisateur)
+//
 // -----------------------------------------------------------------------------
-
 use axum::{
     Extension, Json,
-    extract::State,
+    extract::{Path, Query, State},
     http::StatusCode,
 };
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::api::auth::AuthUser;
 use crate::db::AppState;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// POST /share_request — opération B (Demande de partage)
-// ─────────────────────────────────────────────────────────────────────────────
 //
-// L'app source demande au serveur les infos nécessaires pour construire la
-// commande UART `share_*` vers la BK source.
+// ─────────────────────────────────────────────────────────────
+// STRUCTURES — REQUEST / RESPONSE
+// ─────────────────────────────────────────────────────────────
 //
-// Contrat firmware/protocole :
-//
-// Input :
-//   - volume_name        : nom du volume à partager. Le serveur le résout en
-//                          UUID en filtrant sur l'user authentifié.
-//   - target_user_email  : email de l'utilisateur cible. Le serveur le résout
-//                          en BindKey cible (la plus récente, ACTIVE, avec
-//                          pub_ecdh enregistré).
-//
-// La source est identifiée implicitement par l'authentification (§5) : pas
-// besoin de source_sn dans le payload, le BK source réinjectera son propre
-// SN au moment de /share_complete (cf. step 5 du protocole UART).
-//
-// Action serveur :
-//   1. Résoudre volume_name → volume_id (filtré sur owner = auth.user_id).
-//   2. Résoudre target_user_email → user → BindKey cible (ACTIVE + pub_ecdh).
-//   3. Allouer un target_slot libre dans [10..14] (cf. §3 — un slot est
-//      considéré occupé tant qu'il y a un volume_share existant pour ce
-//      target_sn, peu importe le statut, parce qu'on n'a pas de révocation
-//      en v1).
-//   4. Retourner (target_sn, target_pub_ecdh, target_slot, volume_id).
-//
-// Allocation à la volée : aucune réservation n'est posée en base avant
-// /share_complete. Si deux requêtes parallèles obtiennent le même slot, la
-// deuxième échouera au moment du complete via la contrainte UNIQUE
-// (target_sn, target_slot) — au client de rejouer.
 
+/// Payload envoyé par l'utilisateur source pour initier un partage
 #[derive(Debug, Deserialize)]
 pub struct ShareRequestPayload {
-    pub volume_name: String,
-    pub target_user_email: String,
+    pub volume_name: String,       // nom du volume à partager
+    pub target_user_email: String, // utilisateur cible
 }
 
+/// Réponse contenant les infos nécessaires au chiffrement côté device
 #[derive(Debug, Serialize)]
 pub struct ShareRequestResponse {
     pub target_sn: String,
@@ -71,6 +50,12 @@ pub struct ShareRequestResponse {
     /// Label firmware du volume (ex: "bindkey-vol-0001"), seul format compris par la BindKey.
     pub volume_id: String,
 }
+
+//
+// ─────────────────────────────────────────────────────────────
+// POST /share_request — INITIATION DU PARTAGE
+// ─────────────────────────────────────────────────────────────
+//
 
 pub async fn request_share(
     Extension(auth): Extension<AuthUser>,
@@ -102,8 +87,7 @@ pub async fn request_share(
         "volume introuvable pour cet utilisateur".into(),
     ))?;
 
-    // 2. Résoudre target_user_email → BindKey cible.
-    //    Critères : status ACTIVE, pub_ecdh non-NULL. Plus récente si plusieurs.
+    // 2. Trouver la BindKey cible (ACTIVE + pub_ecdh)
     let target: Option<(String, String)> = sqlx::query_as(
         r#"
         SELECT b.sn, b.pub_ecdh
@@ -123,17 +107,14 @@ pub async fn request_share(
 
     let (target_sn, target_pubkey_ecdh) = target.ok_or((
         StatusCode::UNPROCESSABLE_ENTITY,
-        "utilisateur cible introuvable ou sans BindKey ACTIVE avec pub_ecdh".into(),
+        "cible invalide (pas de BindKey compatible)".into(),
     ))?;
 
-    // 3. Allouer un slot libre dans [10..14] (cf. §3 — un slot est occupé
-    //    tant qu'une ligne volume_shares existe pour ce target_sn, peu importe
-    //    le statut ou le wrapped_blob, parce qu'on n'a pas de révocation v1).
-    //    NULL si tous les 5 slots sont occupés → 409 CONFLICT.
+    // 3. Trouver un slot libre [10..14]
     let slot: Option<(Option<i16>,)> = sqlx::query_as(
         r#"
         SELECT MIN(s)::SMALLINT
-        FROM (VALUES (10::SMALLINT),(11),(12),(13),(14)) AS slots(s)
+        FROM (VALUES (10),(11),(12),(13),(14)) AS slots(s)
         WHERE s NOT IN (
             SELECT target_slot FROM volume_shares WHERE target_sn = $1
         )
@@ -146,21 +127,15 @@ pub async fn request_share(
 
     let target_slot = slot
         .and_then(|(s,)| s)
-        .ok_or((
-            StatusCode::CONFLICT,
-            "tous les slots [10..14] sont occupés sur la BindKey cible".into(),
-        ))?;
+        .ok_or((StatusCode::CONFLICT, "aucun slot disponible".into()))?;
 
-    // 4. Pré-réserver la ligne dans volume_shares avec wrapped_blob=NULL.
-    //    /share_complete viendra UPDATE le wrapped_blob plus tard.
-    //    L'INSERT peut échouer en concurrence sur la contrainte UNIQUE
-    //    (target_sn, target_slot) : un autre /share_request a pris le même
-    //    slot entre notre SELECT et notre INSERT → 409, le client rejoue.
+    // 4. Pré-réserver le partage en base (wrapped_blob = NULL)
     let share_id = Uuid::new_v4();
+
     let insert_res = sqlx::query(
         r#"
         INSERT INTO volume_shares
-            (id, source_sn, target_sn, volume_id, target_slot, wrapped_blob, status)
+        (id, source_sn, target_sn, volume_id, target_slot, wrapped_blob, status)
         VALUES ($1, $2, $3, $4, $5, NULL, 'PENDING')
         "#,
     )
@@ -172,18 +147,12 @@ pub async fn request_share(
     .execute(&state.db)
     .await;
 
-    if let Err(e) = insert_res {
-        if let Some(db_err) = e.as_database_error()
-            && db_err.code() == Some(std::borrow::Cow::Borrowed("23505"))
-        {
-            return Err((
-                StatusCode::CONFLICT,
-                "slot pris en concurrence, rejouer la requête".into(),
-            ));
-        }
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")));
+    // Gestion concurrence (slot déjà pris)
+    if insert_res.is_err() {
+        return Err((StatusCode::CONFLICT, "slot déjà pris".into()));
     }
 
+    // 5. Retourner infos au client
     Ok(Json(ShareRequestResponse {
         target_sn,
         target_pubkey_ecdh,
@@ -192,19 +161,11 @@ pub async fn request_share(
     }))
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// POST /share_complete — opération C (Stockage du wrapped)
-// ─────────────────────────────────────────────────────────────────────────────
 //
-// L'app source a obtenu le `wrapped` (60 bytes) en réponse UART de la BK source
-// au step 5 du protocole. Elle le pousse au serveur, qui finalise la ligne
-// pré-réservée à /share_request en posant `wrapped_blob`.
+// ─────────────────────────────────────────────────────────────
+// POST /share_complete — FINALISATION
+// ─────────────────────────────────────────────────────────────
 //
-// Body (cf. step 6 du protocole soft) :
-//   { source_sn, target_sn, volume_id, wrapped }
-// `wrapped` est attendu en hex (120 caractères = 60 bytes), comme sur l'UART.
-//
-// Sécurité §5 : source_sn doit appartenir à l'user authentifié.
 
 #[derive(Debug, Deserialize)]
 pub struct ShareCompletePayload {
@@ -227,22 +188,17 @@ pub async fn complete_share(
     State(state): State<AppState>,
     Json(payload): Json<ShareCompletePayload>,
 ) -> Result<Json<ShareCompleteResponse>, (StatusCode, String)> {
-    // 1. Sécurité §5 : source_sn doit appartenir à l'user authentifié.
-    let source_owner: Option<(Uuid,)> = sqlx::query_as(
-        "SELECT user_id FROM bindkeys WHERE sn = $1",
-    )
-    .bind(&payload.source_sn)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+    // 1. Vérifier que la BindKey source appartient à l'utilisateur
+    let owner: Option<(Uuid,)> = sqlx::query_as("SELECT user_id FROM bindkeys WHERE sn = $1")
+        .bind(&payload.source_sn)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "DB error".into()))?;
 
-    let (source_user_id,) = source_owner
-        .ok_or((StatusCode::NOT_FOUND, "source_sn introuvable".into()))?;
-    if source_user_id != auth.user_id {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "source_sn n'appartient pas à l'utilisateur authentifié".into(),
-        ));
+    let (user_id,) = owner.ok_or((StatusCode::NOT_FOUND, "source inconnue".into()))?;
+
+    if user_id != auth.user_id {
+        return Err((StatusCode::FORBIDDEN, "non autorisé".into()));
     }
 
     // 1bis. Résoudre le label firmware → UUID interne, scoppé au owner authentifié.
@@ -269,18 +225,10 @@ pub async fn complete_share(
         )
     })?;
     if wrapped_bytes.len() != 60 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!(
-                "wrapped doit faire exactement 60 bytes ({} reçus)",
-                wrapped_bytes.len()
-            ),
-        ));
+        return Err((StatusCode::BAD_REQUEST, "taille invalide".into()));
     }
 
-    // 3. UPDATE de la ligne pré-réservée la plus récente pour ce triplet.
-    //    Match sur wrapped_blob IS NULL = filtre les RESERVED uniquement,
-    //    impossible d'écraser un wrapped déjà posé (idempotence + sécurité).
+    // 3. Mettre à jour le partage
     let updated: Option<(Uuid,)> = sqlx::query_as(
         r#"
         UPDATE volume_shares
@@ -291,7 +239,6 @@ pub async fn complete_share(
               AND target_sn = $2
               AND volume_id = $3
               AND wrapped_blob IS NULL
-            ORDER BY created_at DESC
             LIMIT 1
         )
         RETURNING id
@@ -303,15 +250,213 @@ pub async fn complete_share(
     .bind(&wrapped_bytes)
     .fetch_optional(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "DB error".into()))?;
 
-    let (share_id,) = updated.ok_or((
-        StatusCode::NOT_FOUND,
-        "aucun partage en attente pour (source_sn, target_sn, volume_id)".into(),
-    ))?;
+    let (share_id,) = updated.ok_or((StatusCode::NOT_FOUND, "pas de share".into()))?;
 
     Ok(Json(ShareCompleteResponse {
         share_id,
         status: "PENDING",
     }))
+}
+
+//
+// ─────────────────────────────────────────────────────────────
+// GET /shares/received — LISTE DES PARTAGES REÇUS
+// ─────────────────────────────────────────────────────────────
+//
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct ReceivedShareResponse {
+    pub share_id: Uuid,
+    pub source_sn: String,
+    pub volume_id: Uuid,
+    pub target_slot: i16,
+    pub status: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn list_received_shares(
+    Extension(auth): Extension<AuthUser>,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<ReceivedShareResponse>>, (StatusCode, String)> {
+    // Retourne les partages prêts à être utilisés
+    let shares = sqlx::query_as::<_, ReceivedShareResponse>(
+        r#"
+        SELECT vs.id, vs.source_sn, vs.volume_id, vs.target_slot,
+               vs.status::text, vs.created_at
+        FROM volume_shares vs
+        JOIN bindkeys b ON b.sn = vs.target_sn
+        WHERE b.user_id = $1
+          AND vs.status = 'PENDING'
+          AND vs.wrapped_blob IS NOT NULL
+        "#,
+    )
+    .bind(auth.user_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "DB error".into()))?;
+
+    Ok(Json(shares))
+}
+
+//
+// ─────────────────────────────────────────────────────────────
+// POST /shares/:id/accept — ACCEPTER
+// ─────────────────────────────────────────────────────────────
+//
+
+pub async fn accept_share(
+    Extension(auth): Extension<AuthUser>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let res = sqlx::query(
+        r#"
+        UPDATE volume_shares vs
+        SET status = 'DELIVERED', delivered_at = now()
+        FROM bindkeys b
+        WHERE vs.id = $1
+          AND b.sn = vs.target_sn
+          AND b.user_id = $2
+        "#,
+    )
+    .bind(id)
+    .bind(auth.user_id)
+    .execute(&state.db)
+    .await;
+
+    if res.is_err() {
+        return Err((StatusCode::NOT_FOUND, "share introuvable".into()));
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+//
+// ─────────────────────────────────────────────────────────────
+// POST /shares/:id/deny — REFUSER
+// ─────────────────────────────────────────────────────────────
+//
+
+pub async fn deny_share(
+    Extension(auth): Extension<AuthUser>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let res = sqlx::query(
+        r#"
+        DELETE FROM volume_shares vs
+        USING bindkeys b
+        WHERE vs.id = $1
+          AND b.sn = vs.target_sn
+          AND b.user_id = $2
+        "#,
+    )
+    .bind(id)
+    .bind(auth.user_id)
+    .execute(&state.db)
+    .await;
+
+    if res.is_err() {
+        return Err((StatusCode::NOT_FOUND, "share introuvable".into()));
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PendingSharesQuery {
+    pub target_sn: String,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct PendingShareResponse {
+    pub share_id: Uuid,
+    pub source_sn: String,
+    pub volume_id: Uuid,
+    pub target_slot: i16,
+    pub wrapped: String,
+}
+
+pub async fn get_pending_shares(
+    Extension(auth): Extension<AuthUser>,
+    State(state): State<AppState>,
+    Query(query): Query<PendingSharesQuery>,
+) -> Result<Json<Vec<PendingShareResponse>>, (StatusCode, String)> {
+    let owns_target_sn: Option<(Uuid,)> =
+        sqlx::query_as("SELECT user_id FROM bindkeys WHERE sn = $1")
+            .bind(&query.target_sn)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    let Some((owner_id,)) = owns_target_sn else {
+        return Err((StatusCode::NOT_FOUND, "target_sn not found".into()));
+    };
+
+    if owner_id != auth.user_id {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "target_sn does not belong to authenticated user".into(),
+        ));
+    }
+
+    let shares = sqlx::query_as::<_, PendingShareResponse>(
+        r#"
+        SELECT
+            id AS share_id,
+            source_sn,
+            volume_id,
+            target_slot,
+            encode(wrapped_blob, 'hex') AS wrapped
+        FROM volume_shares
+        WHERE target_sn = $1
+          AND status = 'PENDING'
+          AND wrapped_blob IS NOT NULL
+        ORDER BY created_at ASC
+        "#,
+    )
+    .bind(&query.target_sn)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    Ok(Json(shares))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ShareAckPayload {
+    pub share_id: Uuid,
+}
+
+pub async fn acknowledge_share(
+    Extension(auth): Extension<AuthUser>,
+    State(state): State<AppState>,
+    Json(payload): Json<ShareAckPayload>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let res = sqlx::query(
+        r#"
+        UPDATE volume_shares vs
+        SET status = 'DELIVERED',
+            delivered_at = now()
+        FROM bindkeys b
+        WHERE vs.id = $1
+          AND b.sn = vs.target_sn
+          AND b.user_id = $2
+          AND vs.status = 'PENDING'
+          AND vs.wrapped_blob IS NOT NULL
+        "#,
+    )
+    .bind(payload.share_id)
+    .bind(auth.user_id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    if res.rows_affected() == 0 {
+        return Err((StatusCode::NOT_FOUND, "share not found".into()));
+    }
+
+    Ok(StatusCode::NO_CONTENT)
 }

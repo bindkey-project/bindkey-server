@@ -12,7 +12,6 @@ use uuid::Uuid;
 // ─────────────────────────────────────────────────────────────
 // Test 1 : flow enrollement + doublon
 // ─────────────────────────────────────────────────────────────use bindkey_server::api::middleware::hasher_mot_de_passe;
-use bindkey_server::api::middleware::chiffrer_aes;
 
 #[tokio::test]
 async fn test_full_security_and_enrollment_flow() {
@@ -563,7 +562,6 @@ async fn generate_real_admin_hash() {
 
     // 3. Ton chiffrement AES (Utilise ta fonction avec Nonce aléatoire + préfixe)
     // Assure-toi que export PWD_ENCRYPTION_KEY=... est fait dans le terminal
-    let final_db_string = chiffrer_aes(&argon_hash);
 
     println!("\n\n🚀 VALEUR À COPIER EN BDD (password_hash) :\n{}\n", final_db_string);
 }*/

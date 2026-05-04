@@ -27,9 +27,6 @@ pub use user_routes_module::user_routes;
 // Routes liées aux volumes chiffrés
 pub mod volume_routes;
 
-// Routes de partage et permissions
-pub mod permission_routes;
-
 // Routes de gestion des sessions (login / refresh / logout)
 pub mod session_routes;
 
@@ -44,7 +41,6 @@ pub mod share_routes;
 // ─────────────────────────────────────────────────────────────
 
 pub use mount_routes::mount_routes;
-pub use permission_routes::permission_routes;
 pub use session_routes::session_routes;
 pub use share_routes::share_routes;
 pub use volume_routes::volume_routes;
