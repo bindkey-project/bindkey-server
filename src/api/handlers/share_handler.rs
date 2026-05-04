@@ -376,7 +376,8 @@ pub struct PendingShareResponse {
     pub source_sn: String,
     /// Clé publique ECDH de la BindKey source — nécessaire au déchiffrement côté cible.
     pub source_pubkey_ecdh: String,
-    pub volume_id: Uuid,
+    /// Label firmware ("bindkey-vol-XXXX"), seul format compris par la BindKey.
+    pub volume_id: String,
     /// Renommé `slot` côté wire pour matcher le contrat firmware.
     pub slot: i16,
     pub wrapped: String,
@@ -411,11 +412,12 @@ pub async fn get_pending_shares(
             vs.id            AS share_id,
             vs.source_sn,
             b.pub_ecdh       AS source_pubkey_ecdh,
-            vs.volume_id,
+            v.label          AS volume_id,
             vs.target_slot   AS slot,
             encode(vs.wrapped_blob, 'hex') AS wrapped
         FROM volume_shares vs
         JOIN bindkeys b ON b.sn = vs.source_sn
+        JOIN volumes  v ON v.id = vs.volume_id
         WHERE vs.target_sn = $1
           AND vs.status = 'PENDING'
           AND vs.wrapped_blob IS NOT NULL
