@@ -2,18 +2,18 @@
 //
 // Helper centralisé pour écrire dans la table audit_logs
 // Objectif : éviter de répéter du SQL partout dans les handlers.
- 
+
 use crate::db::AppState;
 use chrono::Utc;
+use tracing::{debug, error, info};
 use uuid::Uuid;
-use tracing::{info, error, debug};
 #[derive(Debug, Clone, Copy)]
 pub enum AuditSeverity {
     INFO,
     WARNING,
     ERROR,
 }
- 
+
 impl AuditSeverity {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -23,7 +23,7 @@ impl AuditSeverity {
         }
     }
 }
- 
+
 /// Écrit un log dans audit_logs.
 /// - user_id / bindkey_id sont optionnels
 /// - details est optionnel
@@ -36,8 +36,11 @@ pub async fn write_audit_log(
     details: Option<String>,
     severity: AuditSeverity,
 ) {
-    debug!("⏳ Tentative d'audit: action={} pour user={:?}", action, user_id);
- 
+    debug!(
+        "⏳ Tentative d'audit: action={} pour user={:?}",
+        action, user_id
+    );
+
     let query_result = sqlx::query(
         r#"
         INSERT INTO audit_logs (id, user_id, bindkey_id, action, details, severity, created_at)
@@ -53,10 +56,13 @@ pub async fn write_audit_log(
     .bind(Utc::now())
     .execute(&state.db)
     .await;
- 
+
     match query_result {
         Ok(_) => {
-            info!("✅ Audit inséré : {} pour l'utilisateur {:?}", action, user_id);
+            info!(
+                "✅ Audit inséré : {} pour l'utilisateur {:?}",
+                action, user_id
+            );
         }
         Err(e) => {
             error!("❌ ÉCHEC AUDIT [{}]:", action);
@@ -77,4 +83,3 @@ pub async fn write_audit_log(
         }
     }
 }
- 

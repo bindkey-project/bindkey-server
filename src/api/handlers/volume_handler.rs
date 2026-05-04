@@ -1,4 +1,3 @@
-
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -7,8 +6,8 @@ use axum::{
 use sqlx::Row; // Crucial pour row.get()
 use uuid::Uuid;
 
-use crate::api::audit::{write_audit_log, AuditSeverity};
-use crate::api::auth::{require_role, AuthUser};
+use crate::api::audit::{AuditSeverity, write_audit_log};
+use crate::api::auth::{AuthUser, require_role};
 use crate::api::models::user::UserRole;
 use crate::api::models::volume::Volume;
 use crate::db::AppState;
@@ -80,7 +79,6 @@ pub struct FindVolumeIdResponse {
 // ─────────────────────────────────────────────────────────────
 // HANDLERS
 // ─────────────────────────────────────────────────────────────
-
 
 pub async fn prepare_volume(
     Extension(auth): Extension<AuthUser>,
@@ -174,7 +172,7 @@ pub async fn create_volume(
 ) -> Result<(StatusCode, Json<CreateVolumeResponse>), (StatusCode, String)> {
     // 1. Récupération de la BindKey la plus récente du user
     let bindkey_id: Uuid = sqlx::query_scalar(
-        "SELECT id FROM bindkeys WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1"
+        "SELECT id FROM bindkeys WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
     )
     .bind(auth.user_id)
     .fetch_one(&state.db)
@@ -201,7 +199,10 @@ pub async fn create_volume(
     .await
     .map_err(|e| {
         tracing::error!("SQL INSERT FAILED: {:?}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, format!("Erreur SQL: {e}"))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Erreur SQL: {e}"),
+        )
     })?;
 
     let (status, message) = match inserted {
@@ -216,7 +217,8 @@ pub async fn create_volume(
         "VOLUME_CREATE",
         Some(format!("label={} name={}", payload.id, payload.name)),
         AuditSeverity::INFO,
-    ).await;
+    )
+    .await;
 
     Ok((
         status,
@@ -238,7 +240,15 @@ pub async fn get_volume(
         .map_err(|_| (StatusCode::NOT_FOUND, "Volume not found".into()))?;
 
     if v.owner_id != auth.user_id && !require_role(&auth.role, &UserRole::ADMIN) {
-        write_audit_log(&state, Some(auth.user_id), None, "VOLUME_FORBIDDEN", Some(format!("get denied id={}", id)), AuditSeverity::WARNING).await;
+        write_audit_log(
+            &state,
+            Some(auth.user_id),
+            None,
+            "VOLUME_FORBIDDEN",
+            Some(format!("get denied id={}", id)),
+            AuditSeverity::WARNING,
+        )
+        .await;
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
 
@@ -301,8 +311,16 @@ pub async fn update_volume(
         return Err((StatusCode::NOT_FOUND, "Volume not found".into()));
     }
 
-    write_audit_log(&state, Some(auth.user_id), None, "VOLUME_UPDATE", Some(format!("id={}", id)), AuditSeverity::INFO).await;
-   
+    write_audit_log(
+        &state,
+        Some(auth.user_id),
+        None,
+        "VOLUME_UPDATE",
+        Some(format!("id={}", id)),
+        AuditSeverity::INFO,
+    )
+    .await;
+
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -331,8 +349,16 @@ pub async fn delete_volume(
         return Err((StatusCode::NOT_FOUND, "Volume not found".into()));
     }
 
-    write_audit_log(&state, Some(auth.user_id), None, "VOLUME_DELETE", Some(format!("id={} deleted", id)), AuditSeverity::WARNING).await;
-    
+    write_audit_log(
+        &state,
+        Some(auth.user_id),
+        None,
+        "VOLUME_DELETE",
+        Some(format!("id={} deleted", id)),
+        AuditSeverity::WARNING,
+    )
+    .await;
+
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -367,7 +393,7 @@ pub async fn get_volume_key(
         .bind(auth.user_id)
         .fetch_optional(&state.db)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))? ;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
 
         if perm.is_some() {
             has_permission = true;
@@ -375,7 +401,15 @@ pub async fn get_volume_key(
     }
 
     if !is_owner && !is_admin && !has_permission {
-        write_audit_log(&state, Some(auth.user_id), None, "VOLUME_FORBIDDEN", Some(format!("key access denied volume_id={}", volume_id)), AuditSeverity::WARNING).await;
+        write_audit_log(
+            &state,
+            Some(auth.user_id),
+            None,
+            "VOLUME_FORBIDDEN",
+            Some(format!("key access denied volume_id={}", volume_id)),
+            AuditSeverity::WARNING,
+        )
+        .await;
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
 
@@ -395,7 +429,15 @@ pub async fn get_volume_key(
 
     let (encrypted_key, key_version) = row;
 
-    write_audit_log(&state, Some(auth.user_id), None, "VOLUME_KEY_READ", Some(format!("volume_id={}", volume_id)), AuditSeverity::INFO).await;
+    write_audit_log(
+        &state,
+        Some(auth.user_id),
+        None,
+        "VOLUME_KEY_READ",
+        Some(format!("volume_id={}", volume_id)),
+        AuditSeverity::INFO,
+    )
+    .await;
 
     Ok(Json(GetVolumeKeyResponse {
         volume_id,

@@ -5,9 +5,9 @@ pub mod db;
 use crate::db::AppState;
 use axum::Router;
 use dotenvy::dotenv;
-use std::env;
 use sqlx::postgres::PgPoolOptions;
-use tokio::time::{sleep, Duration};
+use std::env;
+use tokio::time::{Duration, sleep};
 
 /// Charge la Root CA depuis les variables d'environnement.
 ///
@@ -48,20 +48,24 @@ pub async fn create_app_instance() -> Router {
                 break p;
             }
             Err(e) => {
-                eprintln!("⏳ PostgreSQL n'est pas encore prêt ({}), nouvelle tentative dans 2s...", e);
+                eprintln!(
+                    "⏳ PostgreSQL n'est pas encore prêt ({}), nouvelle tentative dans 2s...",
+                    e
+                );
                 sleep(Duration::from_secs(2)).await;
             }
         }
     };
 
-    sqlx::migrate!()
-        .run(&pool)
-        .await
-        .expect("Migration failed");
+    sqlx::migrate!().run(&pool).await.expect("Migration failed");
 
     let (ca_cert_pem, ca_key_pem) = load_root_ca_from_env();
 
-    let state = AppState { db: pool, ca_cert_pem, ca_key_pem };
+    let state = AppState {
+        db: pool,
+        ca_cert_pem,
+        ca_key_pem,
+    };
 
     api::create_app(state)
 }

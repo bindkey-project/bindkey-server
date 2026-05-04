@@ -9,23 +9,22 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
- 
+
 // UUID : identifiants uniques (users, bindkeys, etc.)
 use uuid::Uuid;
- 
+
 // AppState : contient le pool de connexion PostgreSQL
 use crate::db::AppState;
 
 // Génération de certificat BindKey (nouvelle route)
 use crate::api::middleware::ca::generate_bindkey_certificate;
- 
+
 // Modèle Bindkey + enum de statut
 use crate::api::models::bindkey::{Bindkey, BindkeyStatus};
- 
+
 // Auth (RBAC)
 use crate::api::auth::{AuthUser, require_role};
 use crate::api::models::user::UserRole;
- 
 
 // Audit
 use crate::api::audit::{AuditSeverity, write_audit_log};
@@ -39,23 +38,23 @@ use crate::api::audit::{AuditSeverity, write_audit_log};
 // Associer une BindKey biométrique à un utilisateur
 // → opération faite UNE SEULE FOIS lors de l’enrôlement
 //
- 
+
 /// Données reçues depuis le client lors de l’enrôlement
 #[derive(serde::Deserialize)]
 pub struct EnrollBindkeyRequest {
-    pub user_id: Uuid,                // Utilisateur propriétaire de la BindKey
-    pub sn: String,                   // SN ATECC608 (9 bytes), identité du device
-    pub pub_sign: String,             // PUB_SIGN — pubkey ECDSA P-256 (slot 0)
-    pub pub_ecdh: String,             // PUB_ECDH — pubkey ECDH P-256 (slot 1), requis pour partage de volumes
+    pub user_id: Uuid,    // Utilisateur propriétaire de la BindKey
+    pub sn: String,       // SN ATECC608 (9 bytes), identité du device
+    pub pub_sign: String, // PUB_SIGN — pubkey ECDSA P-256 (slot 0)
+    pub pub_ecdh: String, // PUB_ECDH — pubkey ECDH P-256 (slot 1), requis pour partage de volumes
 }
- 
+
 /// Réponse envoyée après enrôlement réussi
 #[derive(serde::Serialize)]
 pub struct EnrollBindkeyResponse {
     pub bindkey_id: Uuid,
     pub message: String,
 }
- 
+
 /// Handler POST /bindkeys/enroll
 pub async fn enroll_bindkey(
     Extension(auth): Extension<AuthUser>, // Utilisateur authentifié (middleware)
@@ -66,11 +65,11 @@ pub async fn enroll_bindkey(
     if !require_role(&auth.role, &UserRole::ENROLLER) {
         return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
     }
- 
+
     // 1. Génération d’un UUID pour la nouvelle BindKey
- 
+
     let bindkey_id = Uuid::new_v4();
- 
+
     // 2. Requête SQL d’insertion
     let query = r#"
         INSERT INTO bindkeys (
@@ -98,7 +97,7 @@ pub async fn enroll_bindkey(
                         "Erreur : Cette BindKey est déjà associée à un utilisateur.".into(),
                     );
                 }
- 
+
                 // Code 23503 = Violation de clé étrangère (L'utilisateur n'existe pas)
                 if db_error.code() == Some(std::borrow::Cow::Borrowed("23503")) {
                     return (
@@ -107,7 +106,7 @@ pub async fn enroll_bindkey(
                     );
                 }
             }
- 
+
             // Si c'est une autre erreur inconnue, on garde le 500
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -115,14 +114,14 @@ pub async fn enroll_bindkey(
             )
             // --- FIN DE L'AMÉLIORATION ---
         })?;
- 
+
     // 4. Réponse OK
     Ok(Json(EnrollBindkeyResponse {
         bindkey_id,
         message: "BindKey enrolled successfully".into(),
     }))
 }
- 
+
 //
 // ─────────────────────────────────────────────────────────────
 // 2) GET — GET /bindkeys/:id
@@ -131,7 +130,7 @@ pub async fn enroll_bindkey(
 // Objectif :
 // Récupérer une BindKey précise par son UUID
 //
- 
+
 pub async fn get_bindkey(
     State(state): State<AppState>,
     Path(id): Path<Uuid>, // UUID depuis l’URL
@@ -141,10 +140,10 @@ pub async fn get_bindkey(
         .fetch_one(&state.db)
         .await
         .map_err(|_| (StatusCode::NOT_FOUND, "BindKey not found".into()))?;
- 
+
     Ok(Json(bindkey))
 }
- 
+
 //
 // ─────────────────────────────────────────────────────────────
 // 3) GET — GET /users/:id/bindkeys
@@ -153,7 +152,7 @@ pub async fn get_bindkey(
 // Objectif :
 // Lister toutes les BindKeys associées à un utilisateur
 //
- 
+
 pub async fn get_user_bindkeys(
     State(state): State<AppState>,
     Path(user_id): Path<Uuid>,
@@ -168,10 +167,10 @@ pub async fn get_user_bindkeys(
                 format!("Failed to fetch bindkeys: {}", e),
             )
         })?;
- 
+
     Ok(Json(bindkeys))
 }
- 
+
 //
 // ─────────────────────────────────────────────────────────────
 // 4) PATCH — PATCH /bindkeys/:id/status
@@ -181,7 +180,7 @@ pub async fn get_user_bindkeys(
 // Changer le statut d’une BindKey
 // (ACTIVE / LOST / BROKEN / RESET)
 //
- 
+
 /// Body JSON attendu
 #[derive(serde::Deserialize)]
 pub struct UpdateBindkeyStatusRequest {
@@ -210,7 +209,7 @@ pub async fn update_bindkey_status(
     if !require_role(&auth.role, &UserRole::ENROLLER) {
         return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
     }
- 
+
     let res = sqlx::query("UPDATE bindkeys SET status = $1 WHERE id = $2")
         .bind(payload.status)
         .bind(id)
@@ -222,12 +221,12 @@ pub async fn update_bindkey_status(
                 format!("Failed to update status: {}", e),
             )
         })?;
- 
+
     // Si aucune ligne modifiée → BindKey inexistante
     if res.rows_affected() == 0 {
         return Err((StatusCode::NOT_FOUND, "BindKey not found".into()));
     }
- 
+
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -279,18 +278,13 @@ pub async fn admin_update_bindkey_status_by_serial(
         UPDATE bindkeys
         SET status = $1
         WHERE sn = $2
-        "#
+        "#,
     )
     .bind(payload.status)
     .bind(&serial_number)
     .execute(&state.db)
     .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("SQL error: {e}"),
-        )
-    })?;
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
 
     // ------------------------------------------------------------------
     // 4. Si aucune ligne n'a été modifiée
@@ -307,17 +301,17 @@ pub async fn admin_update_bindkey_status_by_serial(
     //
     // On enregistre l'action admin dans les logs d'audit.
     let _ = write_audit_log(
-    &state,
-    Some(auth.user_id),
-    None,
-    "ADMIN_BINDKEY_STATUS_UPDATE",
-    Some(format!(
-        "serial_number={} new_status={}",
-        serial_number, status_for_log
-    )),
-    AuditSeverity::WARNING,
-)
-.await;
+        &state,
+        Some(auth.user_id),
+        None,
+        "ADMIN_BINDKEY_STATUS_UPDATE",
+        Some(format!(
+            "serial_number={} new_status={}",
+            serial_number, status_for_log
+        )),
+        AuditSeverity::WARNING,
+    )
+    .await;
 
     // ------------------------------------------------------------------
     // 6. Réponse attendue
@@ -333,14 +327,14 @@ pub async fn admin_update_bindkey_status_by_serial(
 // Objectif :
 // Tracer une réinitialisation de BindKey (audit & sécurité)
 //
- 
+
 #[derive(serde::Deserialize)]
 pub struct ResetBindkeyRequest {
     pub reset_type: String, // perte, corruption, effacement…
                             // ⚠️ performed_by supprimé côté sécurité :
                             // on utilise auth.user_id (sinon spoof possible)
 }
- 
+
 pub async fn reset_bindkey(
     Extension(auth): Extension<AuthUser>, // Utilisateur authentifié
     State(state): State<AppState>,
@@ -351,9 +345,9 @@ pub async fn reset_bindkey(
     if !require_role(&auth.role, &UserRole::ENROLLER) {
         return Err((StatusCode::FORBIDDEN, "ENROLLER/ADMIN required".into()));
     }
- 
+
     let reset_id = Uuid::new_v4();
- 
+
     sqlx::query(
         r#"
         INSERT INTO bindkey_resets (
@@ -377,7 +371,7 @@ pub async fn reset_bindkey(
             format!("Failed to reset bindkey: {}", e),
         )
     })?;
- 
+
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -417,8 +411,7 @@ pub async fn generate_certificate_for_bindkey(
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
-    let (user_id_opt, pub_sign) =
-        row.ok_or((StatusCode::NOT_FOUND, "BindKey not found".into()))?;
+    let (user_id_opt, pub_sign) = row.ok_or((StatusCode::NOT_FOUND, "BindKey not found".into()))?;
     let user_id = user_id_opt.unwrap_or(Uuid::nil());
 
     // 2. Signature d'un certificat autour de la pubkey de signature de la BindKey.
@@ -430,7 +423,12 @@ pub async fn generate_certificate_for_bindkey(
         &bindkey_id.to_string(),
         &user_id.to_string(),
     )
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Erreur génération certificat: {e}")))?;
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Erreur génération certificat: {e}"),
+        )
+    })?;
 
     // 3. Stockage du certificat en base (écrase l'ancien si existant)
     sqlx::query("UPDATE bindkeys SET certificate = $1 WHERE id = $2")
@@ -438,7 +436,12 @@ pub async fn generate_certificate_for_bindkey(
         .bind(bindkey_id)
         .execute(&state.db)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Erreur stockage certificat: {e}")))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Erreur stockage certificat: {e}"),
+            )
+        })?;
 
     // 4. Audit
     let _ = write_audit_log(
@@ -480,4 +483,3 @@ pub async fn get_certificate_for_bindkey(
         "Aucun certificat généré pour cette BindKey".into(),
     ))
 }
- 

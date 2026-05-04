@@ -24,8 +24,6 @@ pub mod bindkey_routes;
 pub use bindkey_routes::bindkey_routes;
 pub use user_routes_module::user_routes;
 
-
-
 // Routes liées aux volumes chiffrés
 pub mod volume_routes;
 
@@ -44,7 +42,6 @@ pub mod share_routes;
 // ─────────────────────────────────────────────────────────────
 // Ré-export des routeurs spécialisés
 // ─────────────────────────────────────────────────────────────
-
 
 pub use mount_routes::mount_routes;
 pub use permission_routes::permission_routes;
