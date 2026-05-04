@@ -114,9 +114,9 @@ pub async fn verify_volume(
     State(state): State<AppState>,
     Json(payload): Json<VerifyVolumeRequest>,
 ) -> Result<Json<VerifyVolumeResponse>, (StatusCode, String)> {
-    // 1. Recherche par nom
-    let existing: Option<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM volumes WHERE owner_id = $1 AND name = $2 LIMIT 1"
+    // 1. Recherche par nom user-friendly → renvoie le label firmware existant
+    let existing: Option<String> = sqlx::query_scalar(
+        "SELECT label FROM volumes WHERE owner_id = $1 AND name = $2 LIMIT 1"
     )
     .bind(auth.user_id)
     .bind(&payload.name)
@@ -124,25 +124,32 @@ pub async fn verify_volume(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
-    if let Some(id) = existing {
-        let id_str = String::from_utf8(id.as_bytes().to_vec()).unwrap_or_else(|_| id.to_string());
+    if let Some(label) = existing {
         return Ok(Json(VerifyVolumeResponse {
             exists: true,
-            volume_id: Some(id_str),
+            volume_id: Some(label),
         }));
     }
 
-    // 2. Calcul du prochain ID (Commence à 0002)
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM volumes WHERE owner_id = $1")
-        .bind(auth.user_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error count: {e}")))?;
+    // 2. Calcul du prochain label : MAX(suffixe existant) + 1, à défaut on démarre à 0002
+    let next_suffix: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COALESCE(
+            MAX(CAST(SUBSTRING(label FROM '[0-9]+$') AS BIGINT)) + 1,
+            2
+        )::BIGINT
+        FROM volumes
+        WHERE owner_id = $1
+        "#,
+    )
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error count: {e}")))?;
 
-    let next_id_str = format!("bindkey-vol-{:04}", count + 2);
-    
-    // Log pour le pod
-    tracing::info!("Verify: Volume '{}' non trouvé. Proposition ID: {}", payload.name, next_id_str);
+    let next_id_str = format!("bindkey-vol-{:04}", next_suffix);
+
+    tracing::info!("Verify: Volume '{}' non trouvé. Proposition label: {}", payload.name, next_id_str);
 
     Ok(Json(VerifyVolumeResponse {
         exists: false,
@@ -155,14 +162,7 @@ pub async fn create_volume(
     State(state): State<AppState>,
     Json(payload): Json<CreateVolumeRequest>,
 ) -> Result<(StatusCode, Json<CreateVolumeResponse>), (StatusCode, String)> {
-    
-    // 1. Conversion String -> UUID
-    let vol_uuid = Uuid::from_bytes(
-        payload.id.as_bytes().try_into()
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Format d'ID invalide".into()))?
-    );
-
-    // 2. Récupération de la BindKey
+    // 1. Récupération de la BindKey la plus récente du user
     let bindkey_id: Uuid = sqlx::query_scalar(
         "SELECT id FROM bindkeys WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1"
     )
@@ -171,40 +171,48 @@ pub async fn create_volume(
     .await
     .map_err(|_| (StatusCode::NOT_FOUND, "BindKey manquante".into()))?;
 
-    // 3. Insertion SQL (On a retiré encrypted_key ici)
-    sqlx::query(
+    // 2. INSERT idempotent : si (owner, label) existe déjà, on ne re-crée pas
+    let vol_uuid = Uuid::new_v4();
+    let inserted: Option<Uuid> = sqlx::query_scalar(
         r#"
-        INSERT INTO volumes (id, owner_id, bindkey_id, name, size_bytes)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO volumes (id, owner_id, bindkey_id, label, name, size_bytes)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (owner_id, label) DO NOTHING
+        RETURNING id
         "#,
     )
-    .bind(vol_uuid)      // $1
-    .bind(auth.user_id)  // $2
-    .bind(bindkey_id)    // $3
-    .bind(&payload.name) // $4
-    .bind(payload.size_bytes) // $5
-    .execute(&state.db)
+    .bind(vol_uuid)
+    .bind(auth.user_id)
+    .bind(bindkey_id)
+    .bind(&payload.id)
+    .bind(&payload.name)
+    .bind(payload.size_bytes)
+    .fetch_optional(&state.db)
     .await
     .map_err(|e| {
         tracing::error!("SQL INSERT FAILED: {:?}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, format!("Erreur SQL: {e}"))
     })?;
 
-    // 4. Audit
+    let (status, message) = match inserted {
+        Some(_) => (StatusCode::CREATED, "Volume créé avec succès".to_string()),
+        None    => (StatusCode::OK,      "Volume déjà existant".to_string()),
+    };
+
     let _ = write_audit_log(
         &state,
         Some(auth.user_id),
         None,
         "VOLUME_CREATE",
-        Some(format!("vol_id={} name={}", payload.id, payload.name)),
+        Some(format!("label={} name={}", payload.id, payload.name)),
         AuditSeverity::INFO,
     ).await;
 
     Ok((
-        StatusCode::CREATED,
+        status,
         Json(CreateVolumeResponse {
             volume_id: payload.id,
-            message: "Volume créé avec succès".into(),
+            message,
         }),
     ))
 }

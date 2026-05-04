@@ -32,6 +32,8 @@ pub struct Volume {
     /// (ON DELETE CASCADE en DB).
     pub owner_id: Uuid,
     pub bindkey_id: Uuid, // <-- Ajout ici
+    /// Identifiant logique exposé au firmware (ex : "bindkey-vol-0001").
+    pub label: String,
     /// Nom lisible du volume (ex : "Travail", "Photos", "Secret").
     pub name: String,
 

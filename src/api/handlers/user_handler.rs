@@ -148,6 +148,7 @@ pub async fn get_user_by_id(
     State(state): State<AppState>,
     Path(user_id): Path<Uuid>,
 ) -> Result<Json<User>, (StatusCode, String)> {
+    tracing::info!("get_user_by_id called with id={}", user_id);
     let is_self = auth.user_id == user_id;
     let can_read_any = require_role(&auth.role, &UserRole::ENROLLER);
  
@@ -217,6 +218,7 @@ pub async fn search_user_by_email(
     State(state): State<AppState>,
     Query(q): Query<UserEmailQuery>,
 ) -> Result<Json<UserSearchResponse>, (StatusCode, String)> {
+    tracing::info!("search_user_by_email called with email={}", q.email);
     if q.email.trim().is_empty() {
         return Err((StatusCode::BAD_REQUEST, "email is required".into()));
     }
