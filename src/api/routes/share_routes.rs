@@ -20,7 +20,7 @@ use crate::db::AppState;
 
 use axum::{
     Router,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 
 // Import des handlers liés au sharing
@@ -31,8 +31,9 @@ use crate::api::handlers::share_handler::{
     complete_share, // finaliser le partage (wrapped blob)
     deny_share,     // refuser un partage
     get_pending_shares,
-    list_received_shares, // voir les partages reçus
-    request_share,        // initier un partage
+    list_received_shares,   // voir les partages reçus
+    remove_received_share,  // retirer un partage côté cible (libère le slot)
+    request_share,          // initier un partage
 };
 
 pub fn share_routes() -> Router<AppState> {
@@ -131,6 +132,20 @@ pub fn share_routes() -> Router<AppState> {
         // → équivalent du DENIED dans l'ancien système
         // ─────────────────────────────────────────
         .route("/shares/:id/deny", post(deny_share))
+        // ─────────────────────────────────────────
+        // DELETE /shares/received/:id
+        //
+        // → Côté destinataire
+        //
+        // Action :
+        //   - supprime la ligne volume_shares (PENDING ou DELIVERED)
+        //   - libère le slot [10..14] sur la BindKey cible
+        //
+        // Effet :
+        //   - le partage disparaît côté destinataire uniquement
+        //   - le volume du propriétaire n'est pas affecté
+        // ─────────────────────────────────────────
+        .route("/shares/received/:id", delete(remove_received_share))
         .route("/shares/pending", get(get_pending_shares))
         .route("/share_acknowledged", post(acknowledge_share))
 }

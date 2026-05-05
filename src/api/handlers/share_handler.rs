@@ -82,10 +82,16 @@ pub async fn request_share(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
-    let (volume_id, volume_label, source_sn) = volume.ok_or((
-        StatusCode::NOT_FOUND,
-        "volume introuvable pour cet utilisateur".into(),
-    ))?;
+    let (volume_id, volume_label, source_sn) = volume.ok_or_else(|| {
+        tracing::warn!(
+            "share_request: volume introuvable — auth.user_id={}, volume_name='{}'",
+            auth.user_id, payload.volume_name
+        );
+        (
+            StatusCode::NOT_FOUND,
+            "volume introuvable pour cet utilisateur".into(),
+        )
+    })?;
 
     // 2. Trouver la BindKey cible (ACTIVE + pub_ecdh)
     let target: Option<(String, String)> = sqlx::query_as(
@@ -435,6 +441,44 @@ pub async fn get_pending_shares(
 #[derive(Debug, Deserialize)]
 pub struct ShareAckPayload {
     pub share_id: Uuid,
+}
+
+//
+// ─────────────────────────────────────────────────────────────
+// DELETE /shares/received/:id — RETIRER UN PARTAGE CÔTÉ CIBLE
+// ─────────────────────────────────────────────────────────────
+//
+// Permet au destinataire d'un partage (PENDING ou DELIVERED) de le
+// retirer de son côté. Cela supprime la ligne `volume_shares` et
+// libère le slot [10..14] sur sa BindKey. Le volume du propriétaire
+// n'est pas affecté.
+//
+
+pub async fn remove_received_share(
+    Extension(auth): Extension<AuthUser>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let res = sqlx::query(
+        r#"
+        DELETE FROM volume_shares vs
+        USING bindkeys b
+        WHERE vs.id = $1
+          AND b.sn = vs.target_sn
+          AND b.user_id = $2
+        "#,
+    )
+    .bind(id)
+    .bind(auth.user_id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    if res.rows_affected() == 0 {
+        return Err((StatusCode::NOT_FOUND, "share introuvable".into()));
+    }
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn acknowledge_share(
