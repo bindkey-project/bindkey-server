@@ -1,35 +1,54 @@
 use axum::{
-    extract::{Request, State}, // Request ici (alias axum::extract::Request)
+    extract::{Request, State},
     http::{StatusCode, header},
     middleware::Next,
     response::Response,
 };
 
 use chrono::Utc;
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 use uuid::Uuid;
 
 use crate::api::auth::AuthUser;
 use crate::api::models::user::{UserRole, UserStatus};
 use crate::db::AppState;
 
-/// Middleware global : valide "Authorization: Bearer <server_token>"
-/// et injecte `AuthUser` dans `req.extensions()`.
+// HMAC-SHA256 utilisé pour comparer le token reçu avec le hash stocké en base.
+type HmacSha256 = Hmac<Sha256>;
+
+fn hash_token(token: &str) -> Result<String, String> {
+    let secret =
+        std::env::var("TOKEN_HASH_SECRET").map_err(|_| "TOKEN_HASH_SECRET manquant".to_string())?;
+
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+        .map_err(|_| "Erreur création HMAC".to_string())?;
+
+    mac.update(token.as_bytes());
+
+    Ok(hex::encode(mac.finalize().into_bytes()))
+}
+
+/// Middleware global :
+/// - lit `Authorization: Bearer <server_token>`
+/// - hash le token reçu avec HMAC-SHA256
+/// - compare ce hash avec `sessions.server_token` en base
+/// - vérifie expiration + statut utilisateur
+/// - injecte `AuthUser` dans la requête
 pub async fn auth_middleware(
     State(state): State<AppState>,
     mut req: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, String)> {
-    // --- BLOC CORRIGÉ POUR LES TESTS ---
+    // En mode test, on bypass l’auth réelle.
     if cfg!(feature = "skip-auth") {
-        // En mode test, on injecte un vrai utilisateur existant en base
-        // pour éviter les erreurs de clé étrangère sur owner_id, created_by, etc.
         let maybe_user = sqlx::query_as::<_, (Uuid,)>(
             r#"
-        SELECT id
-        FROM users
-        ORDER BY created_at ASC
-        LIMIT 1
-        "#,
+            SELECT id
+            FROM users
+            ORDER BY created_at ASC
+            LIMIT 1
+            "#,
         )
         .fetch_optional(&state.db)
         .await
@@ -49,21 +68,25 @@ pub async fn auth_middleware(
 
         return Ok(next.run(req).await);
     }
-    // ------------------------------------
-    // 1) Lire le header Authorization
+
+    // 1) Lire le header Authorization.
     let auth_header = req
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
         .unwrap_or("");
 
-    // 2) Extraire "Bearer <token>"
+    // 2) Extraire le token brut depuis "Bearer <token>".
     let token = auth_header.strip_prefix("Bearer ").ok_or((
         StatusCode::UNAUTHORIZED,
         "Missing/invalid Bearer token".into(),
     ))?;
 
-    // 3) Charger la session et vérifier expiration
+    // 3) Hasher le token reçu.
+    // La base ne contient jamais le token en clair, seulement son hash HMAC.
+    let token_hash = hash_token(token).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    // 4) Charger la session correspondant au hash.
     let (_session_id, user_id, expires_at) =
         sqlx::query_as::<_, (Uuid, Uuid, chrono::DateTime<Utc>)>(
             r#"
@@ -72,16 +95,17 @@ pub async fn auth_middleware(
             WHERE server_token = $1
             "#,
         )
-        .bind(token)
+        .bind(&token_hash)
         .fetch_one(&state.db)
         .await
         .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid session token".into()))?;
 
+    // 5) Vérifier expiration.
     if expires_at < Utc::now() {
         return Err((StatusCode::UNAUTHORIZED, "Session expired".into()));
     }
 
-    // 4) Charger role + status du user
+    // 6) Charger rôle + statut utilisateur.
     let (role, status) = sqlx::query_as::<_, (UserRole, UserStatus)>(
         r#"
         SELECT role, status
@@ -94,13 +118,14 @@ pub async fn auth_middleware(
     .await
     .map_err(|_| (StatusCode::UNAUTHORIZED, "User not found".into()))?;
 
+    // 7) Refuser un utilisateur désactivé.
     if status != UserStatus::ACTIVE {
         return Err((StatusCode::FORBIDDEN, "User disabled".into()));
     }
 
-    // 5) Injecter AuthUser pour les handlers (Extension<AuthUser>)
+    // 8) Injecter AuthUser pour les handlers.
     req.extensions_mut().insert(AuthUser { user_id, role });
 
-    // 6) Continuer vers le handler
+    // 9) Continuer vers la route demandée.
     Ok(next.run(req).await)
 }

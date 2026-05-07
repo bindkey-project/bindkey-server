@@ -69,7 +69,11 @@ spec:
               valueFrom: { secretKeyRef: { name: bindkey-rootca, key: ROOT_CA_KEY_PEM } }
             - name: RUST_LOG
               value: "debug"
-
+            - name: TOKEN_HASH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: bindkey-token-secret
+                  key: TOKEN_HASH_SECRET
 ---
 # --- 3. SERVICE PERMANENT (Inchangé) ---
 apiVersion: v1
