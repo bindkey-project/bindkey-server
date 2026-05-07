@@ -10,15 +10,16 @@ use axum::{
 
 // Import des handlers liés aux volumes chiffrés
 use crate::api::handlers::volume_handler::{
-    create_volume,     // POST   /volumes
-    delete_volume,     // DELETE /volumes/:id
-    find_volume_id,    // GET    /volumes/find_id?name=...
-    get_volume,        // GET    /volumes/:id
-    get_volume_key,    // GET    /volumes/:id/key <-- Ajouté ici
-    list_user_volumes, // GET    /users/:id/volumes
-    prepare_volume,    // POST   /volumes/prepare
-    update_volume,     // PATCH  /volumes/:id
-    verify_volume,     // POST   /volumes/verify
+    create_volume,          // POST   /volumes
+    delete_volume,          // DELETE /volumes/:id
+    delete_volume_by_label, // DELETE /volumes/delete_id/:id (sans check owner)
+    find_volume_id,         // GET    /volumes/find_id?name=...
+    get_volume,             // GET    /volumes/:id
+    get_volume_key,         // GET    /volumes/:id/key
+    list_user_volumes,      // GET    /users/:id/volumes
+    prepare_volume,         // POST   /volumes/prepare
+    update_volume,          // PATCH  /volumes/:id
+    verify_volume,          // POST   /volumes/verify
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -68,7 +69,13 @@ pub fn volume_routes() -> Router<crate::db::AppState> {
         .route("/volumes/:id", patch(update_volume))
         // ─────────────────────────────────────────
         // DELETE /volumes/:id
-        // Supprimer définitivement un volume
+        // Supprimer définitivement un volume (param = label firmware)
         // ─────────────────────────────────────────
         .route("/volumes/:id", delete(delete_volume))
+        // ─────────────────────────────────────────
+        // DELETE /volumes/delete_id/:id
+        // Supprime un volume par son label firmware SANS vérifier le propriétaire
+        // (l'authentification reste exigée par le middleware).
+        // ─────────────────────────────────────────
+        .route("/volumes/delete_id/:id", delete(delete_volume_by_label))
 }

@@ -365,6 +365,34 @@ pub async fn delete_volume(
     Ok(StatusCode::NO_CONTENT)
 }
 
+pub async fn delete_volume_by_label(
+    Extension(auth): Extension<AuthUser>,
+    State(state): State<AppState>,
+    Path(label): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let res = sqlx::query("DELETE FROM volumes WHERE label = $1")
+        .bind(&label)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
+
+    if res.rows_affected() == 0 {
+        return Err((StatusCode::NOT_FOUND, "Volume not found".into()));
+    }
+
+    write_audit_log(
+        &state,
+        Some(auth.user_id),
+        None,
+        "VOLUME_DELETE",
+        Some(format!("label={} deleted (no-owner-check)", label)),
+        AuditSeverity::WARNING,
+    )
+    .await;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub async fn get_volume_key(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
