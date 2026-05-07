@@ -139,7 +139,8 @@ pub async fn verify_volume(
         }));
     }
 
-    // 2. Calcul du prochain label : MAX(suffixe existant) + 1, à défaut on démarre à 0002
+    // 2. Calcul du prochain label : MAX(suffixe existant) + 1 sur l'ensemble des
+    //    volumes (le label est unique globalement), à défaut on démarre à 0002.
     let next_suffix: i64 = sqlx::query_scalar(
         r#"
         SELECT COALESCE(
@@ -147,10 +148,8 @@ pub async fn verify_volume(
             2
         )::BIGINT
         FROM volumes
-        WHERE owner_id = $1
         "#,
     )
-    .bind(auth.user_id)
     .fetch_one(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error count: {e}")))?;
@@ -185,7 +184,7 @@ pub async fn create_volume(
         r#"
         INSERT INTO volumes (id, owner_id, bindkey_id, label, name, size_bytes)
         VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (owner_id, label) DO NOTHING
+        ON CONFLICT (label) DO NOTHING
         RETURNING id
         "#,
     )
@@ -327,20 +326,24 @@ pub async fn update_volume(
 pub async fn delete_volume(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path(label): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let owner_id: Uuid = sqlx::query_scalar("SELECT owner_id FROM volumes WHERE id = $1")
-        .bind(id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|_| (StatusCode::NOT_FOUND, "Volume not found".into()))?;
+    let row: (Uuid, Uuid) = sqlx::query_as(
+        "SELECT id, owner_id FROM volumes WHERE label = $1",
+    )
+    .bind(&label)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|_| (StatusCode::NOT_FOUND, "Volume not found".into()))?;
+
+    let (volume_id, owner_id) = row;
 
     if owner_id != auth.user_id && !require_role(&auth.role, &UserRole::ADMIN) {
         return Err((StatusCode::FORBIDDEN, "Not allowed".into()));
     }
 
     let res = sqlx::query("DELETE FROM volumes WHERE id = $1")
-        .bind(id)
+        .bind(volume_id)
         .execute(&state.db)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL error: {e}")))?;
@@ -354,7 +357,7 @@ pub async fn delete_volume(
         Some(auth.user_id),
         None,
         "VOLUME_DELETE",
-        Some(format!("id={} deleted", id)),
+        Some(format!("label={} id={} deleted", label, volume_id)),
         AuditSeverity::WARNING,
     )
     .await;
