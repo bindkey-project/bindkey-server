@@ -459,9 +459,10 @@ pub async fn find_volume_id(
     Query(params): Query<FindVolumeIdQuery>,
 ) -> Result<Json<FindVolumeIdResponse>, (StatusCode, String)> {
     // Match sur le nom user-friendly OU le label firmware ("bindkey-vol-XXXX"),
-    // toujours scoppé au owner courant.
-    let id: Option<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM volumes WHERE owner_id = $1 AND (name = $2 OR label = $2) LIMIT 1",
+    // toujours scoppé au owner courant. On renvoie le label (jamais l'UUID)
+    // car la bindkey ne comprend que ce format.
+    let label: Option<String> = sqlx::query_scalar(
+        "SELECT label FROM volumes WHERE owner_id = $1 AND (name = $2 OR label = $2) LIMIT 1",
     )
     .bind(auth.user_id)
     .bind(&params.name)
@@ -469,9 +470,7 @@ pub async fn find_volume_id(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
-    let id = id.ok_or((StatusCode::NOT_FOUND, "Volume non trouvé".into()))?;
+    let label = label.ok_or((StatusCode::NOT_FOUND, "Volume non trouvé".into()))?;
 
-    Ok(Json(FindVolumeIdResponse {
-        volume_id: id.to_string(),
-    }))
+    Ok(Json(FindVolumeIdResponse { volume_id: label }))
 }
