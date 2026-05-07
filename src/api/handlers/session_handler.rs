@@ -5,12 +5,15 @@
 use crate::api::audit::{AuditSeverity, write_audit_log};
 use crate::api::middleware;
 use crate::db::AppState;
+
 use axum::{Json, extract::State, http::StatusCode};
 use base64::{Engine as _, engine::general_purpose};
 use chrono::{Duration, Utc};
+use hmac::{Hmac, Mac};
 use p256::EncodedPoint;
 use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
 use rand::{Rng, distr::Alphanumeric, rng};
+use sha2::Sha256;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -72,13 +75,31 @@ fn random_string(len: usize) -> String {
         .map(char::from)
         .collect()
 }
+
 fn random_challenge_hex() -> String {
     use rand::RngCore;
-    let mut bytes = [0u8; 32]; // 16 octets =64 caractères hexadécimaux
+
+    let mut bytes = [0u8; 32];
     rand::rng().fill_bytes(&mut bytes);
 
-    // Conversion en Hexa Majuscule
     bytes.iter().map(|b| format!("{:02X}", b)).collect()
+}
+
+// HMAC-SHA256 utilisé pour stocker les tokens sous forme de hash.
+// Le token original est donné au client une seule fois.
+// En base, on stocke uniquement le hash.
+type HmacSha256 = Hmac<Sha256>;
+
+fn hash_token(token: &str) -> Result<String, String> {
+    let secret =
+        std::env::var("TOKEN_HASH_SECRET").map_err(|_| "TOKEN_HASH_SECRET manquant".to_string())?;
+
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+        .map_err(|_| "Erreur création HMAC".to_string())?;
+
+    mac.update(token.as_bytes());
+
+    Ok(hex::encode(mac.finalize().into_bytes()))
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -103,7 +124,7 @@ pub async fn login_session(
     .fetch_optional(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-    .ok_or((StatusCode::UNAUTHORIZED, "Identifiants invalides v4".into()))?;
+    .ok_or((StatusCode::UNAUTHORIZED, "Identifiants invalides".into()))?;
 
     let user_id: Uuid = row.get("id");
     let bindkey_id: Uuid = row.get("bindkey_id");
@@ -113,8 +134,6 @@ pub async fn login_session(
     let is_valid = middleware::hachage_argon2::verifier_hachage(&payload.password, &argon2_hash);
 
     if !is_valid {
-        // Version simplifiée : on lance l'audit et on n'attend pas forcément le résultat
-        // pour bloquer l'utilisateur, mais on utilise notre nouvelle fonction avec match.
         write_audit_log(
             &state,
             Some(user_id),
@@ -127,29 +146,36 @@ pub async fn login_session(
 
         return Err((StatusCode::UNAUTHORIZED, "Identifiants invalides".into()));
     }
+
     let session_id = Uuid::new_v4();
     let auth_challenge = random_challenge_hex();
     let expires_at = Utc::now() + Duration::minutes(5);
 
-    sqlx::query("INSERT INTO sessions (id, user_id, bindkey_id, auth_challenge, expires_at) VALUES ($1, $2, $3, $4, $5)")
-        .bind(session_id)
-        .bind(user_id)
-        .bind(bindkey_id)
-        .bind(&auth_challenge)
-        .bind(expires_at)
-        .execute(&state.db)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    sqlx::query(
+        r#"
+        INSERT INTO sessions (id, user_id, bindkey_id, auth_challenge, expires_at)
+        VALUES ($1, $2, $3, $4, $5)
+        "#,
+    )
+    .bind(session_id)
+    .bind(user_id)
+    .bind(bindkey_id)
+    .bind(&auth_challenge)
+    .bind(expires_at)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     write_audit_log(
         &state,
         Some(user_id),
         Some(bindkey_id),
         "LOGIN_INITIATED",
-        Some(format!("Session créée: {}", session_id)),
+        Some(format!("Session créée: {session_id}")),
         AuditSeverity::INFO,
     )
     .await;
+
     Ok(Json(LoginResponse {
         session_id,
         auth_challenge,
@@ -164,11 +190,6 @@ pub async fn verify_session(
     State(state): State<AppState>,
     Json(payload): Json<VerifyRequest>,
 ) -> Result<Json<VerifyResponse>, (StatusCode, String)> {
-    println!("DEBUG: Reçu session_id: {}", payload.session_id);
-    println!("DEBUG: Reçu signature: {}", payload.signature);
-    println!("DEBUG: Taille signature: {}", payload.signature.len());
-
-    // 1. Récupération de la session et des infos
     let row = sqlx::query(
         r#"
         SELECT s.user_id, s.bindkey_id, s.auth_challenge,
@@ -176,7 +197,7 @@ pub async fn verify_session(
         FROM sessions s
         JOIN users u ON u.id = s.user_id
         JOIN bindkeys b ON b.id = s.bindkey_id
-        WHERE s.id = $1 AND s.expires_at > NOW()                   
+        WHERE s.id = $1 AND s.expires_at > NOW()
         "#,
     )
     .bind(payload.session_id)
@@ -193,25 +214,22 @@ pub async fn verify_session(
     let challenge: String = row.get("auth_challenge");
     let public_key_raw: String = row.get("pub_sign");
 
-    // 2. Décodage adaptatif de la clé publique (Hexa ou Base64)
+    // Décodage adaptatif de la clé publique : hex ou base64.
     let mut pub_key_bytes = if let Ok(hex_bytes) = hex::decode(public_key_raw.trim()) {
-        println!("DEBUG: Clé publique détectée comme HEXADÉCIMALE");
         hex_bytes
     } else {
-        println!("DEBUG: Tentative de décodage Base64 pour la clé publique");
         general_purpose::STANDARD
             .decode(public_key_raw.trim())
             .map_err(|_| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    "Clé publique: format inconnu (ni Hexa ni Base64)".into(),
+                    "Clé publique: format inconnu".into(),
                 )
             })?
     };
 
-    // Gestion automatique du préfixe SEC1 0x04 (Uncompressed)
+    // Ajout automatique du préfixe SEC1 si la clé est en 64 bytes.
     if pub_key_bytes.len() == 64 {
-        println!("DEBUG: Ajout du header 0x04 à la clé publique (64 -> 65 octets)");
         let mut prefixed = vec![0x04];
         prefixed.extend_from_slice(&pub_key_bytes);
         pub_key_bytes = prefixed;
@@ -231,17 +249,17 @@ pub async fn verify_session(
         )
     })?;
 
-    // 3. Décodage de la signature avec gestion du padding
-    let mut sig_hex = payload.signature.replace(" ", "");
+    // Décodage de la signature hex.
+    let mut sig_hex = payload.signature.replace(' ', "");
 
     if sig_hex.len() % 2 != 0 {
-        sig_hex = format!("0{}", sig_hex);
+        sig_hex = format!("0{sig_hex}");
     }
 
     let mut sig_bytes = hex::decode(&sig_hex).map_err(|_| {
         (
             StatusCode::BAD_REQUEST,
-            "Format Hexa de la signature invalide".into(),
+            "Format hex de la signature invalide".into(),
         )
     })?;
 
@@ -258,67 +276,67 @@ pub async fn verify_session(
         )
     })?;
 
-    // 4. Vérification cryptographique (Version Hardware Compatible)
-
-    // On convertit le challenge Hexa (String) en octets binaires (32 octets)
     let challenge_bytes = hex::decode(&challenge).map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            "Challenge en base invalide (Hexa attendu)".into(),
+            "Challenge en base invalide".into(),
         )
     })?;
 
-    // On utilise PrehashVerifier pour correspondre à la logique de l'ESP
+    // Vérification P-256 compatible matériel.
     use p256::ecdsa::signature::hazmat::PrehashVerifier;
 
-    match verifying_key.verify_prehash(&challenge_bytes, &signature) {
-        Ok(_) => {
-            println!("🔒 Signature VALID (prehash verify: challenge treated as 32-byte digest)");
-        }
-        Err(e) => {
-            // Tentative de secours : au cas où certains utilisent encore le format ASCII
-            println!("DEBUG: Échec prehash, tentative de secours en mode standard...");
-            if verifying_key
-                .verify(challenge.as_bytes(), &signature)
-                .is_ok()
-            {
-                println!("🔒 Signature VALID (standard verify)");
-            } else {
-                let detail_err = format!(
-                    "Signature invalide. Le matériel attend un digest de 32 octets. Erreur: {}",
-                    e
-                );
-                write_audit_log(
-                    &state,
-                    Some(user_id),
-                    Some(bindkey_id),
-                    "VERIFY_FAILED",
-                    Some(detail_err.clone()),
-                    AuditSeverity::ERROR,
-                )
-                .await;
-                return Err((StatusCode::UNAUTHORIZED, format!("ERREUR: {}", detail_err)));
-            }
-        }
+    if let Err(e) = verifying_key.verify_prehash(&challenge_bytes, &signature)
+        && verifying_key
+            .verify(challenge.as_bytes(), &signature)
+            .is_err()
+    {
+        let detail_err = format!("Signature invalide: {e}");
+
+        write_audit_log(
+            &state,
+            Some(user_id),
+            Some(bindkey_id),
+            "VERIFY_FAILED",
+            Some(detail_err.clone()),
+            AuditSeverity::ERROR,
+        )
+        .await;
+
+        return Err((StatusCode::UNAUTHORIZED, detail_err));
     }
 
-    // 5. Génération des tokens finaux
+    // Tokens donnés au client.
     let server_token = random_string(64);
     let local_token = random_string(64);
+
+    // Hash HMAC stockés en base.
+    let server_token_hash =
+        hash_token(&server_token).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    let local_token_hash =
+        hash_token(&local_token).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
     let expires_at = Utc::now() + Duration::minutes(30);
 
     sqlx::query(
-        "UPDATE sessions SET server_token=$1, local_token=$2, auth_challenge=NULL, expires_at=$3 WHERE id=$4"
+        r#"
+        UPDATE sessions
+        SET server_token = $1,
+            local_token = $2,
+            auth_challenge = NULL,
+            expires_at = $3
+        WHERE id = $4
+        "#,
     )
-    .bind(&server_token)
-    .bind(&local_token)
+    .bind(&server_token_hash)
+    .bind(&local_token_hash)
     .bind(expires_at)
     .bind(payload.session_id)
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    // 6. Audit Log du succès
     write_audit_log(
         &state,
         Some(user_id),
@@ -336,6 +354,7 @@ pub async fn verify_session(
         role: row.get("role"),
     }))
 }
+
 // ─────────────────────────────────────────────────────────────
 // POST /sessions/refresh
 // ─────────────────────────────────────────────────────────────
@@ -344,26 +363,47 @@ pub async fn refresh_session(
     State(state): State<AppState>,
     Json(payload): Json<RefreshRequest>,
 ) -> Result<Json<RefreshResponse>, (StatusCode, String)> {
+    // Le client envoie le token original.
+    // Le serveur le hash et compare avec le hash stocké.
+    let server_token_hash =
+        hash_token(&payload.server_token).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
     let row = sqlx::query("SELECT id FROM sessions WHERE server_token = $1 AND expires_at > NOW()")
-        .bind(&payload.server_token)
+        .bind(&server_token_hash)
         .fetch_optional(&state.db)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::UNAUTHORIZED, "Session expirée".into()))?;
 
     let session_uuid: Uuid = row.get("id");
+
     let new_server_token = random_string(64);
     let new_local_token = random_string(64);
+
+    let new_server_token_hash =
+        hash_token(&new_server_token).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    let new_local_token_hash =
+        hash_token(&new_local_token).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
     let expires_at = Utc::now() + Duration::minutes(30);
 
-    sqlx::query("UPDATE sessions SET server_token=$1, local_token=$2, expires_at=$3 WHERE id=$4")
-        .bind(&new_server_token)
-        .bind(&new_local_token)
-        .bind(expires_at)
-        .bind(session_uuid)
-        .execute(&state.db)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    sqlx::query(
+        r#"
+        UPDATE sessions
+        SET server_token = $1,
+            local_token = $2,
+            expires_at = $3
+        WHERE id = $4
+        "#,
+    )
+    .bind(&new_server_token_hash)
+    .bind(&new_local_token_hash)
+    .bind(expires_at)
+    .bind(session_uuid)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(RefreshResponse {
         server_token: new_server_token,
@@ -380,8 +420,11 @@ pub async fn logout_session(
     State(state): State<AppState>,
     Json(payload): Json<LogoutRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    let server_token_hash =
+        hash_token(&payload.server_token).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
     let res = sqlx::query("DELETE FROM sessions WHERE server_token = $1")
-        .bind(&payload.server_token)
+        .bind(&server_token_hash)
         .execute(&state.db)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -394,14 +437,16 @@ pub async fn logout_session(
 }
 
 // ─────────────────────────────────────────────────────────────
-// POST /sessions/test (Route combinée pour Démo)
+// POST /sessions/test
+// Route de démo : crée directement une session validée.
+// Les tokens retournés au client restent en clair,
+// mais la base stocke seulement leurs hash HMAC.
 // ─────────────────────────────────────────────────────────────
 
 pub async fn test_session(
     State(state): State<AppState>,
     Json(payload): Json<LoginRequest>,
 ) -> Result<Json<VerifyResponse>, (StatusCode, String)> {
-    // 1. Authentification classique (identique au login)
     let row = sqlx::query(
         r#"
         SELECT u.id, u.password_hash, u.first_name, u.role::text AS role, b.id AS bindkey_id
@@ -422,7 +467,6 @@ pub async fn test_session(
     let bindkey_id: Uuid = row.get("bindkey_id");
     let encrypted_hash: String = row.get("password_hash");
 
-    // Vérification du mot de passe
     let argon2_hash = middleware::aes_chiffrement::dechiffrer_aes(&encrypted_hash);
     let is_valid = middleware::hachage_argon2::verifier_hachage(&payload.password, &argon2_hash);
 
@@ -436,33 +480,40 @@ pub async fn test_session(
             AuditSeverity::WARNING,
         )
         .await;
+
         return Err((StatusCode::UNAUTHORIZED, "Mot de passe incorrect".into()));
     }
 
-    // 2. Génération immédiate des tokens finaux (Skip du challenge cryptographique)
     let session_id = Uuid::new_v4();
     let server_token = random_string(64);
     let local_token = random_string(64);
+
+    let server_token_hash =
+        hash_token(&server_token).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    let local_token_hash =
+        hash_token(&local_token).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
     let expires_at = Utc::now() + Duration::minutes(30);
 
-    // Insertion directe d'une session validée en base
     sqlx::query(
         r#"
-        INSERT INTO sessions (id, user_id, bindkey_id, server_token, local_token, auth_challenge, expires_at) 
+        INSERT INTO sessions (
+            id, user_id, bindkey_id, server_token, local_token, auth_challenge, expires_at
+        )
         VALUES ($1, $2, $3, $4, $5, NULL, $6)
-        "#
+        "#,
     )
     .bind(session_id)
     .bind(user_id)
     .bind(bindkey_id)
-    .bind(&server_token)
-    .bind(&local_token)
+    .bind(&server_token_hash)
+    .bind(&local_token_hash)
     .bind(expires_at)
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    // 3. Audit Log
     write_audit_log(
         &state,
         Some(user_id),
@@ -473,7 +524,6 @@ pub async fn test_session(
     )
     .await;
 
-    // 4. On renvoie la même structure que /sessions/verify
     Ok(Json(VerifyResponse {
         server_token,
         local_token,
