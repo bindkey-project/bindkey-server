@@ -51,3 +51,12 @@ pub fn dechiffrer_aes(blob_base64: &str) -> String {
 
     String::from_utf8(plaintext_bytes).expect("UTF-8 invalide")
 }
+
+/// Alias explicites pour les champs sensibles.
+pub fn chiffrer_champ_sensible(data: &str) -> String {
+    chiffrer_aes(data)
+}
+
+pub fn dechiffrer_champ_sensible(data: &str) -> String {
+    dechiffrer_aes(data)
+}

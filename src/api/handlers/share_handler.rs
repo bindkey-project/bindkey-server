@@ -28,6 +28,8 @@ use uuid::Uuid;
 use crate::api::auth::AuthUser;
 use crate::db::AppState;
 
+use crate::api::middleware::aes_chiffrement::dechiffrer_champ_sensible;
+
 //
 // ─────────────────────────────────────────────────────────────
 // STRUCTURES — REQUEST / RESPONSE
@@ -99,10 +101,12 @@ pub async fn request_share(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
-    let (target_sn, target_pubkey_ecdh) = target.ok_or((
+    let (target_sn, encrypted_pubkey_ecdh) = target.ok_or((
         StatusCode::UNPROCESSABLE_ENTITY,
         "cible invalide (pas de BindKey compatible)".into(),
     ))?;
+
+    let target_pubkey_ecdh = dechiffrer_champ_sensible(&encrypted_pubkey_ecdh);
 
     // 3. Trouver un slot libre [10..14]
     let slot: Option<(Option<i16>,)> = sqlx::query_as(
