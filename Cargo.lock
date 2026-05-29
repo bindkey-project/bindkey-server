@@ -338,6 +338,7 @@ dependencies = [
  "ecdsa",
  "ed25519-dalek",
  "hex",
+ "hmac",
  "p256",
  "pem",
  "ran",
