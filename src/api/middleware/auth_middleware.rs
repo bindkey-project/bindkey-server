@@ -86,6 +86,15 @@ pub async fn auth_middleware(
     // La base ne contient jamais le token en clair, seulement son hash HMAC.
     let token_hash = hash_token(token).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
+    // [DEBUG] À retirer après diagnostic du 401 admin.
+    tracing::warn!(
+        target: "auth_debug",
+        path = %req.uri().path(),
+        token_recv = %token,
+        token_hash = %token_hash,
+        "auth_middleware: token reçu"
+    );
+
     // 4) Charger la session correspondant au hash.
     let (_session_id, user_id, expires_at) =
         sqlx::query_as::<_, (Uuid, Uuid, chrono::DateTime<Utc>)>(
@@ -98,7 +107,14 @@ pub async fn auth_middleware(
         .bind(&token_hash)
         .fetch_one(&state.db)
         .await
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid session token".into()))?;
+        .map_err(|_| {
+            tracing::warn!(
+                target: "auth_debug",
+                token_hash = %token_hash,
+                "auth_middleware: aucune session ne matche ce hash"
+            );
+            (StatusCode::UNAUTHORIZED, "Invalid session token".into())
+        })?;
 
     // 5) Vérifier expiration.
     if expires_at < Utc::now() {

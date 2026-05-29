@@ -423,6 +423,14 @@ pub async fn logout_session(
     let server_token_hash =
         hash_token(&payload.server_token).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
+    // [DEBUG] À retirer après diagnostic du 404 logout.
+    tracing::warn!(
+        target: "auth_debug",
+        token_recv = %payload.server_token,
+        token_hash = %server_token_hash,
+        "logout_session: token reçu"
+    );
+
     let res = sqlx::query("DELETE FROM sessions WHERE server_token = $1")
         .bind(&server_token_hash)
         .execute(&state.db)
@@ -430,6 +438,11 @@ pub async fn logout_session(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     if res.rows_affected() == 0 {
+        tracing::warn!(
+            target: "auth_debug",
+            token_hash = %server_token_hash,
+            "logout_session: aucune session ne matche ce hash"
+        );
         return Err((StatusCode::NOT_FOUND, "Session non trouvée".into()));
     }
 
