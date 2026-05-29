@@ -481,6 +481,52 @@ pub async fn remove_received_share(
     Ok(StatusCode::NO_CONTENT)
 }
 
+//
+// ─────────────────────────────────────────────────────────────
+// DELETE /shares/sent — RÉVOCATION D'UN PARTAGE PAR L'OWNER
+// ─────────────────────────────────────────────────────────────
+//
+// Permet au propriétaire d'un volume de révoquer un partage qu'il
+// a accordé. Identifie le share par (volume.label, target_sn).
+// Effet : la ligne `volume_shares` est supprimée, le slot [10..14]
+// se libère côté BK cible, qui perd l'accès au volume.
+//
+
+#[derive(Debug, Deserialize)]
+pub struct RevokeShareQuery {
+    pub label: String,
+    pub target_sn: String,
+}
+
+pub async fn revoke_sent_share(
+    Extension(auth): Extension<AuthUser>,
+    State(state): State<AppState>,
+    Query(params): Query<RevokeShareQuery>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let res = sqlx::query(
+        r#"
+        DELETE FROM volume_shares vs
+        USING volumes v
+        WHERE vs.volume_id = v.id
+          AND v.owner_id = $1
+          AND v.label = $2
+          AND vs.target_sn = $3
+        "#,
+    )
+    .bind(auth.user_id)
+    .bind(&params.label)
+    .bind(&params.target_sn)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    if res.rows_affected() == 0 {
+        return Err((StatusCode::NOT_FOUND, "share introuvable".into()));
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub async fn acknowledge_share(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,

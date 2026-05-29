@@ -34,6 +34,7 @@ use crate::api::handlers::share_handler::{
     list_received_shares,   // voir les partages reçus
     remove_received_share,  // retirer un partage côté cible (libère le slot)
     request_share,          // initier un partage
+    revoke_sent_share,      // révoquer un partage côté owner (label + target_sn)
 };
 
 pub fn share_routes() -> Router<AppState> {
@@ -146,6 +147,20 @@ pub fn share_routes() -> Router<AppState> {
         //   - le volume du propriétaire n'est pas affecté
         // ─────────────────────────────────────────
         .route("/shares/received/:id", delete(remove_received_share))
+        // ─────────────────────────────────────────
+        // DELETE /shares/sent?label=<label>&target_sn=<sn>
+        //
+        // → Côté owner du volume
+        //
+        // Action :
+        //   - supprime la ligne volume_shares correspondante
+        //     (filtrée par volumes.owner_id = auth.user_id)
+        //   - libère le slot [10..14] de la BK cible
+        //
+        // Effet :
+        //   - la BK cible perd l'accès au volume partagé
+        // ─────────────────────────────────────────
+        .route("/shares/sent", delete(revoke_sent_share))
         .route("/shares/pending", get(get_pending_shares))
         .route("/share_acknowledged", post(acknowledge_share))
 }
