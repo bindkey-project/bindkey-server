@@ -9,11 +9,10 @@ use crate::db::AppState;
 use axum::{Json, extract::State, http::StatusCode};
 use base64::{Engine as _, engine::general_purpose};
 use chrono::{Duration, Utc};
-use hmac::{Hmac, Mac};
 use p256::EncodedPoint;
 use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
 use rand::{Rng, distr::Alphanumeric, rng};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -85,21 +84,13 @@ fn random_challenge_hex() -> String {
     bytes.iter().map(|b| format!("{:02X}", b)).collect()
 }
 
-// HMAC-SHA256 utilisé pour stocker les tokens sous forme de hash.
+// SHA-256 utilisé pour stocker les tokens sous forme de hash.
 // Le token original est donné au client une seule fois.
 // En base, on stocke uniquement le hash.
-type HmacSha256 = Hmac<Sha256>;
-
-fn hash_token(token: &str) -> Result<String, String> {
-    let secret =
-        std::env::var("TOKEN_HASH_SECRET").map_err(|_| "TOKEN_HASH_SECRET manquant".to_string())?;
-
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-        .map_err(|_| "Erreur création HMAC".to_string())?;
-
-    mac.update(token.as_bytes());
-
-    Ok(hex::encode(mac.finalize().into_bytes()))
+fn hash_token(token: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    hex::encode(hasher.finalize())
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -310,12 +301,9 @@ pub async fn verify_session(
     let server_token = random_string(64);
     let local_token = random_string(64);
 
-    // Hash HMAC stockés en base.
-    let server_token_hash =
-        hash_token(&server_token).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-
-    let local_token_hash =
-        hash_token(&local_token).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    // Hash SHA-256 stockés en base.
+    let server_token_hash = hash_token(&server_token);
+    let local_token_hash = hash_token(&local_token);
 
     let expires_at = Utc::now() + Duration::minutes(30);
 
@@ -365,8 +353,7 @@ pub async fn refresh_session(
 ) -> Result<Json<RefreshResponse>, (StatusCode, String)> {
     // Le client envoie le token original.
     // Le serveur le hash et compare avec le hash stocké.
-    let server_token_hash =
-        hash_token(&payload.server_token).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let server_token_hash = hash_token(&payload.server_token);
 
     let row = sqlx::query("SELECT id FROM sessions WHERE server_token = $1 AND expires_at > NOW()")
         .bind(&server_token_hash)
@@ -380,11 +367,8 @@ pub async fn refresh_session(
     let new_server_token = random_string(64);
     let new_local_token = random_string(64);
 
-    let new_server_token_hash =
-        hash_token(&new_server_token).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-
-    let new_local_token_hash =
-        hash_token(&new_local_token).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let new_server_token_hash = hash_token(&new_server_token);
+    let new_local_token_hash = hash_token(&new_local_token);
 
     let expires_at = Utc::now() + Duration::minutes(30);
 
@@ -420,8 +404,7 @@ pub async fn logout_session(
     State(state): State<AppState>,
     Json(payload): Json<LogoutRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let server_token_hash =
-        hash_token(&payload.server_token).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let server_token_hash = hash_token(&payload.server_token);
 
     // [DEBUG] À retirer après diagnostic du 404 logout.
     tracing::warn!(
@@ -453,7 +436,7 @@ pub async fn logout_session(
 // POST /sessions/test
 // Route de démo : crée directement une session validée.
 // Les tokens retournés au client restent en clair,
-// mais la base stocke seulement leurs hash HMAC.
+// mais la base stocke seulement leurs hash SHA-256.
 // ─────────────────────────────────────────────────────────────
 
 pub async fn test_session(
@@ -501,11 +484,8 @@ pub async fn test_session(
     let server_token = random_string(64);
     let local_token = random_string(64);
 
-    let server_token_hash =
-        hash_token(&server_token).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-
-    let local_token_hash =
-        hash_token(&local_token).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let server_token_hash = hash_token(&server_token);
+    let local_token_hash = hash_token(&local_token);
 
     let expires_at = Utc::now() + Duration::minutes(30);
 

@@ -6,32 +6,23 @@ use axum::{
 };
 
 use chrono::Utc;
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::api::auth::AuthUser;
 use crate::api::models::user::{UserRole, UserStatus};
 use crate::db::AppState;
 
-// HMAC-SHA256 utilisé pour comparer le token reçu avec le hash stocké en base.
-type HmacSha256 = Hmac<Sha256>;
-
-fn hash_token(token: &str) -> Result<String, String> {
-    let secret =
-        std::env::var("TOKEN_HASH_SECRET").map_err(|_| "TOKEN_HASH_SECRET manquant".to_string())?;
-
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-        .map_err(|_| "Erreur création HMAC".to_string())?;
-
-    mac.update(token.as_bytes());
-
-    Ok(hex::encode(mac.finalize().into_bytes()))
+// SHA-256 utilisé pour comparer le token reçu avec le hash stocké en base.
+fn hash_token(token: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    hex::encode(hasher.finalize())
 }
 
 /// Middleware global :
 /// - lit `Authorization: Bearer <server_token>`
-/// - hash le token reçu avec HMAC-SHA256
+/// - hash le token reçu avec SHA-256
 /// - compare ce hash avec `sessions.server_token` en base
 /// - vérifie expiration + statut utilisateur
 /// - injecte `AuthUser` dans la requête
@@ -83,8 +74,8 @@ pub async fn auth_middleware(
     ))?;
 
     // 3) Hasher le token reçu.
-    // La base ne contient jamais le token en clair, seulement son hash HMAC.
-    let token_hash = hash_token(token).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    // La base ne contient jamais le token en clair, seulement son hash SHA-256.
+    let token_hash = hash_token(token);
 
     // [DEBUG] À retirer après diagnostic du 401 admin.
     tracing::warn!(

@@ -63,8 +63,7 @@ hex = "0.4"
 # Hash mot de passe
 argon2 = "0.5"
 
-# Hash/HMAC des tokens de session
-hmac = "0.12"
+# Hash SHA-256 des tokens de session
 sha2 = "0.10"
 
 # Cryptographie signatures / courbes
