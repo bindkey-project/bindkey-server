@@ -9,6 +9,7 @@ pub mod models;
 pub mod routes;
 
 use axum::{Router, extract::State, routing::get};
+use tower_http::catch_panic::CatchPanicLayer;
 
 // État global de l’application
 use crate::db::AppState;
@@ -46,9 +47,12 @@ pub fn create_app(state: AppState) -> Router {
     ));
 
     // 4. Fusion finale
+    // CatchPanicLayer : un panic dans un handler renvoie un 500 propre
+    // au lieu de couper la connexion (sinon nginx voit un 502 "premature close").
     Router::new()
         .merge(public_routes)
         .merge(protected_routes)
+        .layer(CatchPanicLayer::new())
         .with_state(state)
 }
 

@@ -44,6 +44,7 @@ time = "0.3.47"
 
 # Utilitaires Axum/Tower
 tower = { version = "0.5.3", features = ["util"] }
+tower-http = { version = "0.6", features = ["catch-panic"] }
 
 # Génération aléatoire sécurisée
 rand = "0.9.2"
