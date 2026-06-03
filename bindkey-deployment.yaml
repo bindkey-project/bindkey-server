@@ -9,7 +9,7 @@ spec:
   imagePullSecrets:
     - name: ghcr-auth
   storage:
-    size: 1Gi
+    size: 2Gi  # aligné sur le volume réel : CNPG interdit de réduire (shrink) un PVC existant
   bootstrap:
     initdb:
       database: bindkey
@@ -30,11 +30,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: bindkey-api-deployment
-  # Note : Les annotations ici sont lues par l'Updater si write-back-method est 'kubernetes'
-  annotations:
-    argocd-image-updater.argoproj.io/image-list: bindkey=ghcr.io/bindkey-project/bindkey-server/bindkey-server:latest
-    argocd-image-updater.argoproj.io/bindkey.update-strategy: digest
-    argocd-image-updater.argoproj.io/write-back-method: argocd # On passe en mode argocd pour la compatibilité
+  # Annotations ArgoCD Image Updater déplacées sur l'objet Application
+  # (cf. argocd/application.yaml) : l'Updater ne lit QUE l'Application, pas le Deployment.
 spec:
   replicas: 1 
   selector:
