@@ -1,1 +1,13 @@
 /target
+.env
+
+tls.key
+tls.crt
+root-ca.key
+root-ca.crt
+
+*.key
+*.crt
+*.pem
+
+share_server.md

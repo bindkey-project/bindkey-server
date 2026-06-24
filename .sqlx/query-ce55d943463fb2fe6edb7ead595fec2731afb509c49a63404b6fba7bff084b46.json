@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE sessions SET server_token = $1, local_token = $2, auth_challenge = NULL WHERE id = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ce55d943463fb2fe6edb7ead595fec2731afb509c49a63404b6fba7bff084b46"
+}

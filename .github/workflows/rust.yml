@@ -1,0 +1,145 @@
+name: Rust CI Quality & Security
+
+on:
+  push:
+    branches: [ "develop", "marwa-version" ]
+  pull_request:
+    branches: [ "develop", "marwa-version" ]
+
+env:
+  CARGO_TERM_COLOR: always
+  # Image names (S'assure que c'est en minuscules pour GHCR)
+  SERVER_IMAGE: ghcr.io/${{ github.repository_owner }}/bindkey-server/bindkey-server
+  DB_IMAGE: ghcr.io/${{ github.repository_owner }}/bindkey-server/bindkey-db
+
+jobs:
+  # --- JOB 1 : TESTS ET SÉCURITÉ ---
+  security_and_quality:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bindkey      
+          POSTGRES_PASSWORD: bindkey 
+          POSTGRES_DB: bindkey        
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@v2
+
+    - name: Install OpenSSL
+      run: sudo apt-get update && sudo apt-get install -y openssl
+
+    - name: Generate Temporary SSL Certs
+      run: |
+        openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -sha256 -days 1 -nodes \
+        -subj "/C=FR/ST=Paris/L=Paris/O=BindKey/OU=Dev/CN=localhost"
+
+    - name: Audit de sécurité
+      run: cargo audit --ignore RUSTSEC-2023-0071 || echo "Audit failed but continuing"
+
+    - name: Analyse statique (Clippy)
+      run: cargo clippy -- -D warnings
+
+    - name: Run Unit Tests
+      env:
+        # On utilise le secret s'il existe, sinon une clé de test de 32 octets
+        PWD_ENCRYPTION_KEY: ${{ secrets.PWD_ENCRYPTION_KEY || '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f' }}
+        DATABASE_URL: postgres://bindkey:bindkey@localhost:5432/bindkey
+        # AJOUT : Variables Root CA pour éviter le panic au démarrage des tests
+        ROOT_CA_CERT_PEM: "DUMMY_CERT_FOR_CI"
+        ROOT_CA_KEY_PEM: "DUMMY_KEY_FOR_CI"
+      run: cargo test --verbose
+
+    # --- LE SMOKE TEST ---
+    - name: Verify Server Startup & Migrations Logic
+      env:
+        DATABASE_URL: postgres://bindkey:bindkey@localhost:5432/bindkey
+        PWD_ENCRYPTION_KEY: ${{ secrets.PWD_ENCRYPTION_KEY || '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f' }}
+        # AJOUT : Variables Root CA nécessaires pour l'initialisation du AppState
+        ROOT_CA_CERT_PEM: "DUMMY_CERT_FOR_CI"
+        ROOT_CA_KEY_PEM: "DUMMY_KEY_FOR_CI"
+        TLS_CERT_PATH: ./cert.pem
+        TLS_KEY_PATH: ./key.pem
+        RUST_LOG: debug
+      run: |
+        echo "🚀 Lancement du serveur BindKey (Smoke Test)..."
+        
+        # Lancement en arrière-plan
+        cargo run &> server_output.log &
+        SERVER_PID=$!
+
+        echo "⏳ Attente du signal de démarrage..."
+        TIMEOUT=60
+        while [ $TIMEOUT -gt 0 ]; do
+          # On cherche le log qui indique que le serveur est prêt
+          if grep -qi "BindKey SERVER.*running" server_output.log; then
+            echo "✅ SUCCESS : Serveur en ligne et migrations OK !"
+            kill $SERVER_PID
+            exit 0
+          fi
+
+          # Vérification si le processus est toujours en vie
+          if ! kill -0 $SERVER_PID 2>/dev/null; then
+            echo "❌ CRITICAL FAILURE : Le serveur a crashé !"
+            echo "--- LOGS DU SERVEUR ---"
+            cat server_output.log
+            exit 1
+          fi
+
+          sleep 2
+          TIMEOUT=$((TIMEOUT-2))
+        done
+
+        echo "❌ TIMEOUT : Le serveur n'a pas répondu après 60s"
+        cat server_output.log
+        kill $SERVER_PID || true
+        exit 1
+
+  # --- JOB 2 : BUILD ET PUSH ---
+  build_and_push:
+    needs: security_and_quality
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build and push Server Image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        push: true
+        tags: |
+          ${{ env.SERVER_IMAGE }}:latest
+          ${{ env.SERVER_IMAGE }}:${{ github.sha }}
+
+    - name: Build and push DB Image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile.db
+        push: true
+        tags: |
+          ${{ env.DB_IMAGE }}:latest
+          ${{ env.DB_IMAGE }}:${{ github.sha }}

@@ -1,0 +1,57 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            s.id as session_id,\n            s.user_id,\n            s.bindkey_id,\n            u.first_name,\n            u.role as \"role: String\"\n        FROM sessions s\n        INNER JOIN users u ON s.user_id = u.id\n        WHERE s.server_token = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "bindkey_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "first_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "role: String",
+        "type_info": {
+          "Custom": {
+            "name": "user_role",
+            "kind": {
+              "Enum": [
+                "USER",
+                "ENROLLER",
+                "ADMIN"
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d597934ad0b959870b2b95e524d985f2d8adb84e49e82f3ddbf649bac6197398"
+}

@@ -1,0 +1,34 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bindkey-ingress
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    # Capture tout le chemin après le slash
+    # Force la redirection du port 80 vers 443
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Désactive HTTP/2 pour éviter les bugs avec le port-forward
+    nginx.ingress.kubernetes.io/use-http2: "false"
+    # INDISPENSABLE : Dit à Nginx que le serveur Rust écoute en HTTPS
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    # INDISPENSABLE : Ignore le fait que le certificat interne de Rust soit auto-signé
+    nginx.ingress.kubernetes.io/proxy-ssl-verify: "off"
+    # Optionnel mais aide pour le port-forward
+    nginx.ingress.kubernetes.io/proxy-ssl-server-name: "on"
+spec:
+  tls:
+  - hosts:
+    - api.bindkey.local
+    # Le secret créé avec openssl (tls.crt / tls.key)
+    secretName: bindkey-tls-secret
+  rules:
+  - host: api.bindkey.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: bindkey-service
+            port: 
+              number: 8080

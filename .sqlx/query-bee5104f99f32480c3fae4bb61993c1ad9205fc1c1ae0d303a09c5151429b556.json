@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+<<<<<<<< HEAD:.sqlx/query-52dc1ec10ccac23707e1f2bf943967b8e242cd9fdb0500144c0ef1cbc3ce761c.json
+  "query": "\n        SELECT\n            u.id as user_id,\n            u.password_hash,\n            u.first_name,\n            u.role as \"role: String\",\n            b.id as bindkey_id\n        FROM users u\n        INNER JOIN bindkeys b ON u.id = b.user_id\n        WHERE u.email = $1\n        ",
+========
+  "query": "\n        SELECT \n            s.auth_challenge, \n            b.public_key, \n            u.first_name, \n            u.role as \"role: String\"\n        FROM sessions s\n        JOIN users u ON s.user_id = u.id\n        JOIN bindkeys b ON s.bindkey_id = b.id\n        WHERE s.id = $1 AND s.expires_at > NOW()\n        ",
+>>>>>>>> origin/develop:.sqlx/query-bee5104f99f32480c3fae4bb61993c1ad9205fc1c1ae0d303a09c5151429b556.json
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "auth_challenge",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "public_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "first_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "role: String",
+        "type_info": {
+          "Custom": {
+            "name": "user_role",
+            "kind": {
+              "Enum": [
+                "USER",
+                "ENROLLER",
+                "ADMIN"
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+<<<<<<<< HEAD:.sqlx/query-52dc1ec10ccac23707e1f2bf943967b8e242cd9fdb0500144c0ef1cbc3ce761c.json
+  "hash": "52dc1ec10ccac23707e1f2bf943967b8e242cd9fdb0500144c0ef1cbc3ce761c"
+========
+  "hash": "bee5104f99f32480c3fae4bb61993c1ad9205fc1c1ae0d303a09c5151429b556"
+>>>>>>>> origin/develop:.sqlx/query-bee5104f99f32480c3fae4bb61993c1ad9205fc1c1ae0d303a09c5151429b556.json
+}

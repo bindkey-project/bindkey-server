@@ -1,0 +1,82 @@
+# --- 1. LE CLUSTER POSTGRESQL (Inchangé) ---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: bindkey-db
+spec:
+  instances: 1 
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.1
+  imagePullSecrets:
+    - name: ghcr-auth
+  storage:
+    size: 2Gi  # aligné sur le volume réel : CNPG interdit de réduire (shrink) un PVC existant
+  bootstrap:
+    initdb:
+      database: bindkey
+      owner: admin_bindkey 
+      secret:
+        name: bindkey-db-secrets
+  managed:
+    roles:
+      - name: admin_bindkey
+        ensure: present
+        login: true
+        passwordSecret:
+          name: bindkey-db-secrets
+
+---
+# --- 2. L'API RUST (CORRIGÉ) ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bindkey-api-deployment
+  # Annotations ArgoCD Image Updater déplacées sur l'objet Application
+  # (cf. argocd/application.yaml) : l'Updater ne lit QUE l'Application, pas le Deployment.
+spec:
+  replicas: 1 
+  selector:
+    matchLabels:
+      app: bindkey-api
+  template:
+    metadata:
+      labels:
+        app: bindkey-api
+    spec:
+      # --- LA CORRECTION DNS EST ICI ---
+      dnsPolicy: ClusterFirst  # On remet le DNS interne de Kubernetes
+      # On a supprimé le bloc dnsConfig (8.8.8.8) qui empêchait de voir bindkey-db-rw
+      # --------------------------------
+      imagePullSecrets:
+        - name: ghcr-auth
+      containers:
+        - name: bindkey-api
+          image: ghcr.io/bindkey-project/bindkey-server/bindkey-server:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: bindkey-db-secrets, key: dburl }
+            - name: PWD_ENCRYPTION_KEY
+              valueFrom: { secretKeyRef: { name: bindkey-pwd-keys, key: PWD_ENCRYPTION_KEY } }
+            - name: ROOT_CA_CERT_PEM
+              valueFrom: { secretKeyRef: { name: bindkey-rootca, key: ROOT_CA_CERT_PEM } }
+            - name: ROOT_CA_KEY_PEM
+              valueFrom: { secretKeyRef: { name: bindkey-rootca, key: ROOT_CA_KEY_PEM } }
+            - name: RUST_LOG
+              value: "debug"
+---
+# --- 3. SERVICE PERMANENT (Inchangé) ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bindkey-service
+spec:
+  type: NodePort 
+  selector:
+    app: bindkey-api
+  ports:
+    - port: 8080       
+      targetPort: 8080 
+      nodePort: 30080

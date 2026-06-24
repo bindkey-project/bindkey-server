@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE sessions\n        SET server_token = $1, local_token = $2, expires_at = $3\n        WHERE id = $4\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "974582efb79f1ec4461b016cf99bcc7e51008707b642d9c378ce0ce28999352e"
+}
