@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/ouiyam/TP/BindKey/bindkey-software/**)",
+      "Bash(python3 -)"
+    ]
+  }
+}

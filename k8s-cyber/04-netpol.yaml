@@ -1,0 +1,49 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+
+---
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-to-api
+spec:
+  podSelector:
+    matchLabels: { app: bindkey-api }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: infra-gateway }
+          podSelector:
+            matchLabels: { gateway.networking.k8s.io/gateway-name: infra }
+      ports:
+        - port: 8080
+---
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: db-access
+spec:
+  podSelector:
+    matchLabels: { cnpg.io/cluster: bindkey-db }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: bindkey-api }
+      ports:
+        - port: 5432
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: cnpg-system }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: cloudnative-pg }
+      ports:
+        - port: 8000
