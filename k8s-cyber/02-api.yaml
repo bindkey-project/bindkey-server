@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bindkey-api-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: bindkey-api }
+  template:
+    metadata: 
+      labels: { app: bindkey-api }
+    spec:
+      imagePullSecrets:
+        - name: ghcr-auth
+      containers:
+        - name: bindkey-api
+          image: ghcr.io/bindkey-project/bindkey-server/bindkey-server@sha256:846583fbded70ede5cc3ff9edf1b0c127e06ef6d7afc6a5a7c723aacfcb2c991
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: bindkey-db-secrets, key: dburl } }
+            - name: PWD_ENCRYPTION_KEY
+              valueFrom: { secretKeyRef: { name: bindkey-pwd-keys, key: PWD_ENCRYPTION_KEY } }
+            - name: ROOT_CA_CERT_PEM
+              valueFrom: { secretKeyRef: { name: bindkey-rootca, key: ROOT_CA_CERT_PEM } }
+            - name: ROOT_CA_KEY_PEM
+              valueFrom: { secretKeyRef: { name: bindkey-rootca, key: ROOT_CA_KEY_PEM } }
+            - name: RUST_LOG
+              value: info
+          readinessProbe:
+            httpGet: { path: /health, port: 8080, scheme: HTTPS }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+
+---
+
+apiVersion: v1
+kind: Service
+metadata: 
+  name: bindkey-service
+spec:
+  selector: { app: bindkey-api }
+  ports:
+    - port: 8080
+      targetPort: 8080            
+              
+
