@@ -1,0 +1,25 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: bindkey-db
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.4
+  storage:
+    size: 2Gi
+    storageClass: longhorn
+  bootstrap:
+    initdb:
+      database: bindkey
+      owner: admin_bindkey
+      localeCollate: C
+      localeCType: C
+      secret:
+        name: bindkey-db-secrets
+  managed:
+    roles:
+      - name: admin_bindkey
+        ensure: present
+        login: true
+        passwordSecret:
+          name: bindkey-db-secrets
